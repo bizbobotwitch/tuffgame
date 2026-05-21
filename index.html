@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Co-Op Vanguard: Invincible Update</title>
+    <title>Neon Vanguard: Asymmetric Co-Op</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body, html {
@@ -14,7 +14,6 @@
         }
         canvas { display: block; width: 100%; height: 100%; }
         
-        /* UI Menus */
         #menu {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(10, 10, 20, 0.9); padding: 30px;
@@ -30,7 +29,6 @@
         button:active { background: #0ff; color: #000; }
         #my-id-display { font-weight: bold; color: #f0f; margin-bottom: 15px; word-break: break-all; }
 
-        /* Shared HUD */
         #hud {
             position: absolute; top: 20px; left: 0; width: 100%;
             text-align: center; font-size: 20px; font-weight: bold;
@@ -42,8 +40,8 @@
             margin: 10px auto; border-radius: 10px; overflow: hidden;
         }
         #health-bar { width: 100%; height: 100%; background: #0f0; transition: width 0.2s, background 0.2s; }
+        .hud-text { font-size: 16px; margin-top: 5px; text-shadow: 0 0 5px currentColor; }
 
-        /* Mobile Controls */
         #controls {
             position: absolute; bottom: 30px; left: 0; width: 100%;
             display: none; justify-content: space-between; padding: 0 20px; box-sizing: border-box;
@@ -56,10 +54,11 @@
             background: rgba(0, 255, 255, 0.1); border: 2px solid #0ff;
             color: #0ff; font-weight: bold; display: flex;
             align-items: center; justify-content: center; user-select: none;
+            transition: border-color 0.2s, color 0.2s;
         }
         .btn:active { background: rgba(0, 255, 255, 0.5); }
         .btn-action { border-color: #f0f; color: #f0f; }
-        .btn-super { border-color: #ffaa00; color: #ffaa00; display: none; box-shadow: 0 0 15px #ffaa00; }
+        .btn-super { border-color: #ffaa00; color: #ffaa00; box-shadow: 0 0 15px currentColor; display: none; }
         .btn-super:active { background: rgba(255, 170, 0, 0.5); }
         .btn-brake { border-color: #ff3333; color: #ff3333; }
     </style>
@@ -67,19 +66,19 @@
 <body>
 
     <div id="menu">
-        <h2>NEON VANGUARD</h2>
-        <p>Your Co-Op ID:</p>
-        <div id="my-id-display">Initializing Neural Link...</div>
-        <p>Share this ID with your wingman, or enter theirs below!</p>
+        <h2>ASYMMETRIC CO-OP</h2>
+        <p>Your Link ID:</p>
+        <div id="my-id-display">Generating Link...</div>
+        <p>Roles are assigned at 50/50 randomly upon connection.</p>
         <input type="text" id="friend-id" placeholder="Wingman's ID">
-        <button id="join-btn">Initiate Co-Op</button>
+        <button id="join-btn">Initiate Link</button>
         <p id="status"></p>
     </div>
 
     <div id="hud">
         SCORE: <span id="scoreDisplay">0</span>
         <div class="health-bar-container"><div id="health-bar"></div></div>
-        <div id="super-text" style="color: #ffaa00; display: none; animation: flash 0.5s infinite;">VILTRUM MODE ACTIVE</div>
+        <div id="super-text" class="hud-text" style="color: #888; display: none;">LINKING POWERS...</div>
     </div>
 
     <div id="controls">
@@ -135,14 +134,23 @@
                 if (data.type === 'state') {
                     peerPlayer.x = data.px; peerPlayer.y = data.py;
                     peerPlayer.angle = data.pa; peerPlayer.color = data.pc;
-                    peerPlayer.isThrusting = data.pt; peerPlayer.isSuperMode = data.psup;
-                    if (data.fired) spawnLaser(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, false);
+                    peerPlayer.isThrusting = data.pt; 
+                    peerPlayer.chargeTimer = data.pct; 
+                    peerPlayer.isHyperLaser = data.phl;
+                    peerPlayer.role = data.prole;
+
+                    // Role Assignment for Client
+                    if (!isHost && player.role === 'none') {
+                        player.role = data.prole === 'viltrumite' ? 'laser' : 'viltrumite';
+                        applyRoleStats(player);
+                    }
+
+                    if (data.fired) spawnLaser(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, false, data.phl);
                     
                     if (!isHost) {
                         enemies = data.enemies || [];
-                        powerups = data.powerups || [];
                         sharedScore = data.score !== undefined ? data.score : sharedScore;
-                        player.health = data.p2h; // Host tells Client its health
+                        player.health = data.p2h;
                     }
                 } else if (data.type === 'super_trigger') {
                     triggerSuperAnimation(data.x, data.y);
@@ -151,17 +159,20 @@
         }
 
         // --- INPUT HANDLING ---
-        const keys = { left: false, right: false, gas: false, brake: false, fire: false, super: false };
+        const keys = { left: false, right: false, gas: false, brake: false, fire: false };
         const bindBtn = (id, key) => {
             const el = document.getElementById(id);
-            el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; if(key==='super') trySuper(); });
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; });
             el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; });
-            el.addEventListener('mousedown', () => { keys[key] = true; if(key==='super') trySuper(); });
+            el.addEventListener('mousedown', () => keys[key] = true);
             el.addEventListener('mouseup', () => keys[key] = false);
         };
         bindBtn('btn-left', 'left'); bindBtn('btn-right', 'right');
-        bindBtn('btn-gas', 'gas'); bindBtn('btn-brake', 'brake'); bindBtn('btn-super', 'super');
+        bindBtn('btn-gas', 'gas'); bindBtn('btn-brake', 'brake'); 
         
+        document.getElementById('btn-super').addEventListener('touchstart', (e) => { e.preventDefault(); trySuper(); });
+        document.getElementById('btn-super').addEventListener('mousedown', () => trySuper());
+
         document.getElementById('btn-fire').addEventListener('touchstart', (e) => { e.preventDefault(); tryFire(); });
         document.getElementById('btn-fire').addEventListener('mousedown', () => tryFire());
 
@@ -183,37 +194,54 @@
         const player = { 
             x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, color: '#0ff', 
             isThrusting: false, justFired: false, cooldown: 0,
-            health: 100, maxHealth: 100, superModeTimer: 0
+            health: 100, maxHealth: 100, role: 'none', superCooldown: 0, chargeTimer: 0, hyperLaserTimer: 0
         };
-        const peerPlayer = { x: -9999, y: -9999, angle: 0, color: '#f0f', health: 100, isSuperMode: false };
+        const peerPlayer = { x: -9999, y: -9999, angle: 0, color: '#f0f', health: 100, role: 'none', chargeTimer: 0, isHyperLaser: false };
         
-        let lasers = []; let enemies = []; let particles = []; let powerups = []; let superBlasts = [];
+        let lasers = []; let enemies = []; let particles = []; let superBlasts = [];
         
+        function applyRoleStats(p) {
+            if (p.role === 'viltrumite') {
+                p.maxHealth = 500; p.health = 500;
+            } else if (p.role === 'laser') {
+                p.maxHealth = 200; p.health = 200; // Buffed base health so they aren't one-shot
+            }
+            if (p === player) {
+                document.getElementById('btn-super').style.display = 'flex';
+                document.getElementById('super-text').style.display = 'block';
+            }
+        }
+
         // --- LOGIC ---
         function tryFire() {
-            if (player.cooldown <= 0) {
-                spawnLaser(player.x, player.y, player.angle, player.color, true);
+            if (player.cooldown <= 0 && player.chargeTimer <= 0) {
+                spawnLaser(player.x, player.y, player.angle, player.color, true, player.hyperLaserTimer > 0);
                 player.justFired = true;
-                player.cooldown = player.superModeTimer > 0 ? 5 : 15; // Faster fire in super mode
+                player.cooldown = player.hyperLaserTimer > 0 ? 30 : (player.role === 'viltrumite' ? 10 : 15);
             }
         }
 
         function trySuper() {
-            if (player.superModeTimer > 0) {
-                triggerSuperAnimation(player.x, player.y);
-                if (conn && conn.open) conn.send({ type: 'super_trigger', x: player.x, y: player.y });
-                player.superModeTimer = 0; // Consume power mode
-                document.getElementById('btn-super').style.display = 'none';
-                document.getElementById('super-text').style.display = 'none';
+            if (player.superCooldown <= 0 && player.chargeTimer <= 0 && player.role !== 'none') {
+                if (player.role === 'viltrumite') {
+                    player.chargeTimer = 120; // 2 sec fear-freeze charge
+                } else if (player.role === 'laser') {
+                    player.hyperLaserTimer = 300; // 5 sec beam
+                }
+                player.superCooldown = 900; // 15 seconds cooldown at 60 FPS
             }
         }
 
         function triggerSuperAnimation(x, y) {
-            superBlasts.push({ x: x, y: y, radius: 10, maxRadius: 1200, frame: 60 });
+            superBlasts.push({ x: x, y: y, radius: 10, maxRadius: 1500, frame: 60 });
         }
 
-        function spawnLaser(x, y, angle, color, isLocal) {
-            lasers.push({ x: x + Math.cos(angle)*20, y: y + Math.sin(angle)*20, vx: Math.cos(angle)*20, vy: Math.sin(angle)*20, color: color, age: 0 });
+        function spawnLaser(x, y, angle, color, isLocal, isHyper) {
+            if (isHyper) {
+                lasers.push({ x: x + Math.cos(angle)*40, y: y + Math.sin(angle)*40, vx: Math.cos(angle)*30, vy: Math.sin(angle)*30, color: '#00ffff', age: 0, isHyper: true, size: 40 });
+            } else {
+                lasers.push({ x: x + Math.cos(angle)*20, y: y + Math.sin(angle)*20, vx: Math.cos(angle)*20, vy: Math.sin(angle)*20, color: color, age: 0, isHyper: false, size: 4 });
+            }
         }
 
         function spawnExplosion(x, y, color) {
@@ -226,132 +254,130 @@
             document.getElementById('scoreDisplay').innerText = sharedScore;
             const hpBar = document.getElementById('health-bar');
             hpBar.style.width = Math.max(0, (player.health / player.maxHealth) * 100) + "%";
-            hpBar.style.background = player.health > 250 ? '#ffaa00' : (player.health > 30 ? '#0f0' : '#f00');
+            hpBar.style.background = player.health > (player.maxHealth/2) ? '#0f0' : (player.health > (player.maxHealth/4) ? '#ffaa00' : '#f00');
+
+            if (player.role !== 'none') {
+                const superBtn = document.getElementById('btn-super');
+                const superText = document.getElementById('super-text');
+                
+                if (player.superCooldown > 0) {
+                    let secs = Math.ceil(player.superCooldown / 60);
+                    superText.innerText = `COOLDOWN: ${secs}s`;
+                    superText.style.color = '#555';
+                    superBtn.style.borderColor = '#555'; superBtn.style.color = '#555';
+                    superBtn.style.boxShadow = 'none';
+                } else {
+                    superText.innerText = player.role === 'viltrumite' ? 'IMPACT READY' : 'HYPER BEAM READY';
+                    let readyColor = player.role === 'viltrumite' ? '#ffaa00' : '#00ffff';
+                    superText.style.color = readyColor;
+                    superBtn.style.borderColor = readyColor; superBtn.style.color = readyColor;
+                    superBtn.style.boxShadow = `0 0 15px ${readyColor}`;
+                }
+            }
         }
 
         function update() {
-            // Physics & Movement adjustments based on Super Mode
-            let turnSpeed = player.superModeTimer > 0 ? 0.12 : 0.08;
-            let accel = player.superModeTimer > 0 ? 0.8 : 0.4;
+            // Charging Super freezes movement (Viltrumite only)
+            if (player.chargeTimer > 0) {
+                player.chargeTimer--;
+                player.vx *= 0.8; player.vy *= 0.8; 
+                
+                if (player.chargeTimer === 1) {
+                    triggerSuperAnimation(player.x, player.y);
+                    if (conn && conn.open) conn.send({ type: 'super_trigger', x: player.x, y: player.y });
+                }
+            } else {
+                let turnSpeed = player.role === 'viltrumite' ? 0.12 : 0.08;
+                let accel = player.role === 'viltrumite' ? 0.7 : 0.4;
 
-            if (keys.left) player.angle -= turnSpeed;
-            if (keys.right) player.angle += turnSpeed;
+                if (keys.left) player.angle -= turnSpeed;
+                if (keys.right) player.angle += turnSpeed;
 
-            player.isThrusting = keys.gas;
-            if (keys.gas) { player.vx += Math.cos(player.angle) * accel; player.vy += Math.sin(player.angle) * accel; }
-            if (keys.brake) { player.vx *= 0.85; player.vy *= 0.85; } else { player.vx *= 0.98; player.vy *= 0.98; }
+                player.isThrusting = keys.gas;
+                if (keys.gas) { player.vx += Math.cos(player.angle) * accel; player.vy += Math.sin(player.angle) * accel; }
+                if (keys.brake) { player.vx *= 0.85; player.vy *= 0.85; } else { player.vx *= 0.98; player.vy *= 0.98; }
+            }
 
             player.x += player.vx; player.y += player.vy;
             if(player.cooldown > 0) player.cooldown--;
-            
-            if (player.superModeTimer > 0) {
-                player.superModeTimer--;
-                if (player.superModeTimer <= 0) {
-                    player.maxHealth = 100;
-                    if(player.health > 100) player.health = 100; // Lose excess health when it wears off
-                    document.getElementById('btn-super').style.display = 'none';
-                    document.getElementById('super-text').style.display = 'none';
-                } else if (Math.random() > 0.5) {
-                    // Super aura particles
-                    particles.push({ x: player.x + (Math.random()-0.5)*40, y: player.y + (Math.random()-0.5)*40, vx: 0, vy: 0, life: 1.0, decay: 0.1, color: '#ffaa00' });
-                }
-            }
+            if(player.superCooldown > 0) player.superCooldown--;
+            if(player.hyperLaserTimer > 0) player.hyperLaserTimer--;
 
-            // Engine Exhaust
-            if (player.isThrusting) particles.push({ x: player.x - Math.cos(player.angle)*20, y: player.y - Math.sin(player.angle)*20, vx: -player.vx*0.2, vy: -player.vy*0.2, life: 1.0, decay: 0.1, color: player.superModeTimer > 0 ? '#ffaa00' : '#0ff' });
+            // Engine Exhaust Particles
+            if (player.isThrusting && Math.random() > 0.3) {
+                let exhaustColor = player.role === 'viltrumite' ? '#ffaa00' : player.color;
+                particles.push({ x: player.x - Math.cos(player.angle)*20, y: player.y - Math.sin(player.angle)*20, vx: -player.vx*0.2, vy: -player.vy*0.2, life: 1.0, decay: 0.1, color: exhaustColor });
+            }
 
             // Update Super Blasts
             for(let i = superBlasts.length -1; i >= 0; i--) {
-                let b = superBlasts[i];
-                b.radius += (b.maxRadius - b.radius) * 0.15;
-                b.frame--;
+                let b = superBlasts[i]; b.radius += (b.maxRadius - b.radius) * 0.15; b.frame--;
                 if (isHost) {
-                    // Host kills enemies inside blast
                     for (let j = enemies.length - 1; j >= 0; j--) {
                         if (Math.hypot(b.x - enemies[j].x, b.y - enemies[j].y) < b.radius) {
-                            spawnExplosion(enemies[j].x, enemies[j].y, '#f00');
-                            enemies.splice(j, 1); sharedScore += 50;
+                            spawnExplosion(enemies[j].x, enemies[j].y, '#f00'); enemies.splice(j, 1); sharedScore += 50;
                         }
                     }
                 }
                 if (b.frame <= 0) superBlasts.splice(i, 1);
             }
 
-            // Update Lasers & Particles
+            // Update Lasers
             for (let i = lasers.length - 1; i >= 0; i--) {
                 let l = lasers[i]; l.x += l.vx; l.y += l.vy; l.age++;
-                if (l.age > 100) { lasers.splice(i, 1); continue; }
+                if (l.age > (l.isHyper ? 60 : 100)) { lasers.splice(i, 1); continue; }
                 if (isHost) {
                     for (let j = enemies.length - 1; j >= 0; j--) {
-                        if (Math.hypot(l.x - enemies[j].x, l.y - enemies[j].y) < enemies[j].size) {
+                        let hitDist = l.isHyper ? l.size + 10 : enemies[j].size;
+                        if (Math.hypot(l.x - enemies[j].x, l.y - enemies[j].y) < hitDist) {
                             spawnExplosion(enemies[j].x, enemies[j].y, '#f00');
-                            enemies.splice(j, 1); lasers.splice(i, 1); sharedScore += 100; break;
+                            enemies.splice(j, 1); sharedScore += 100;
+                            if (!l.isHyper) { lasers.splice(i, 1); break; }
                         }
                     }
                 }
             }
+
+            // Update Particles
             for (let i = particles.length - 1; i >= 0; i--) {
                 particles[i].x += particles[i].vx; particles[i].y += particles[i].vy;
                 particles[i].life -= particles[i].decay; if (particles[i].life <= 0) particles.splice(i, 1);
             }
 
-            // Host Only Logic: Spawning & Collisions
+            let isFearFreeze = player.chargeTimer > 0 || peerPlayer.chargeTimer > 0;
+
+            // Host Logic (Enemies)
             if (isHost) {
-                // Spawning Enemies
-                if (Math.random() < 0.03 && enemies.length < 30) {
+                if (Math.random() < 0.04 && enemies.length < 50 && !isFearFreeze) {
                     let t = Math.random() > 0.5 ? player : peerPlayer;
-                    enemies.push({ x: t.x + Math.cos(Math.random()*Math.PI*2)*1000, y: t.y + Math.sin(Math.random()*Math.PI*2)*1000, size: 20, targetId: t === player ? 'host' : 'client' });
+                    enemies.push({ x: t.x + Math.cos(Math.random()*Math.PI*2)*1200, y: t.y + Math.sin(Math.random()*Math.PI*2)*1200, size: 20, targetId: t === player ? 'host' : 'client' });
                 }
 
-                // Spawning Power-ups (Chance: ~1/200 per second. At 60fps, 1/(60*200) = 0.00008, let's make it a bit more common for testing, ~0.001)
-                if (Math.random() < 0.001 && powerups.length < 3) {
-                    let t = Math.random() > 0.5 ? player : peerPlayer;
-                    powerups.push({ x: t.x + (Math.random()-0.5)*1500, y: t.y + (Math.random()-0.5)*1500, size: 25 });
-                }
+                if (!isFearFreeze) {
+                    for(let i = enemies.length - 1; i >= 0; i--) {
+                        let e = enemies[i];
+                        let target = e.targetId === 'host' ? player : peerPlayer;
+                        let angle = Math.atan2(target.y - e.y, target.x - e.x);
+                        e.x += Math.cos(angle) * 4; e.y += Math.sin(angle) * 4;
 
-                // Enemy AI & Player Collision
-                for(let i = enemies.length - 1; i >= 0; i--) {
-                    let e = enemies[i];
-                    let target = e.targetId === 'host' ? player : peerPlayer;
-                    let angle = Math.atan2(target.y - e.y, target.x - e.x);
-                    e.x += Math.cos(angle) * 4; e.y += Math.sin(angle) * 4;
-
-                    // Collision with players
-                    let dHost = Math.hypot(player.x - e.x, player.y - e.y);
-                    let dClient = Math.hypot(peerPlayer.x - e.x, peerPlayer.y - e.y);
-                    
-                    if (dHost < 30) {
-                        if (player.superModeTimer > 0) { sharedScore += 50; } else { player.health -= 15; }
-                        spawnExplosion(e.x, e.y, '#f00'); enemies.splice(i, 1);
-                    } else if (dClient < 30) {
-                        if (peerPlayer.isSuperMode) { sharedScore += 50; } else { peerPlayer.health -= 15; }
-                        spawnExplosion(e.x, e.y, '#f00'); enemies.splice(i, 1);
-                    }
-                }
-
-                // Powerup Collision Check
-                for(let i = powerups.length -1; i>=0; i--) {
-                    if (Math.hypot(player.x - powerups[i].x, player.y - powerups[i].y) < 50) {
-                        triggerPowerup(player); powerups.splice(i, 1);
-                    } else if (Math.hypot(peerPlayer.x - powerups[i].x, peerPlayer.y - powerups[i].y) < 50) {
-                        // In real P2P, host should tell client they got it, but here client checks locally too
-                        powerups.splice(i, 1);
-                    }
-                }
-            } else {
-                // Client checks its own powerup pickup to stay responsive
-                for(let i = powerups.length -1; i>=0; i--) {
-                    if (Math.hypot(player.x - powerups[i].x, player.y - powerups[i].y) < 50) {
-                        triggerPowerup(player); powerups.splice(i, 1); // Local predictive splice
+                        let dHost = Math.hypot(player.x - e.x, player.y - e.y);
+                        let dClient = Math.hypot(peerPlayer.x - e.x, peerPlayer.y - e.y);
+                        
+                        if (dHost < 30) {
+                            player.health -= 15;
+                            spawnExplosion(e.x, e.y, '#f00'); enemies.splice(i, 1);
+                        } else if (dClient < 30) {
+                            peerPlayer.health -= 15;
+                            spawnExplosion(e.x, e.y, '#f00'); enemies.splice(i, 1);
+                        }
                     }
                 }
             }
 
             // Death & Respawn
             if (player.health <= 0) {
-                player.health = player.maxHealth;
-                player.x = 0; player.y = 0; player.vx = 0; player.vy = 0;
-                sharedScore = Math.max(0, sharedScore - 500); // Penalty
+                player.health = player.maxHealth; player.x = 0; player.y = 0; player.vx = 0; player.vy = 0;
+                sharedScore = Math.max(0, sharedScore - 500);
             }
 
             updateUI();
@@ -360,43 +386,29 @@
             if (conn && conn.open) {
                 let packet = {
                     type: 'state', px: player.x, py: player.y, pa: player.angle, pc: player.color,
-                    pt: player.isThrusting, psup: player.superModeTimer > 0, fired: player.justFired
+                    pt: player.isThrusting, pct: player.chargeTimer, prole: player.role,
+                    phl: player.hyperLaserTimer > 0, fired: player.justFired
                 };
-                if (isHost) { packet.enemies = enemies; packet.powerups = powerups; packet.score = sharedScore; packet.p2h = peerPlayer.health; }
+                if (isHost) { packet.enemies = enemies; packet.score = sharedScore; packet.p2h = peerPlayer.health; }
                 conn.send(packet);
                 player.justFired = false;
             }
         }
 
-        function triggerPowerup(pTarget) {
-            pTarget.maxHealth = 500;
-            pTarget.health = 500;
-            pTarget.superModeTimer = 600; // 10 seconds at 60fps
-            if (pTarget === player) {
-                document.getElementById('btn-super').style.display = 'flex';
-                document.getElementById('super-text').style.display = 'block';
-            }
-        }
-
         // --- RENDERING ---
         function draw() {
-            // Impact Frames Check (Screen shake and color inversion)
             let isImpact = superBlasts.length > 0;
-            let currentBlast = isImpact ? superBlasts[0] : null;
+            let isFearFreeze = player.chargeTimer > 0 || peerPlayer.chargeTimer > 0;
 
-            if (isImpact && currentBlast.frame % 4 < 2) {
-                ctx.filter = 'invert(1)';
-            } else {
-                ctx.filter = 'none';
-            }
+            if (isImpact && superBlasts[0].frame % 4 < 2) ctx.filter = 'invert(1)';
+            else if (isFearFreeze) ctx.filter = 'grayscale(100%)'; 
+            else ctx.filter = 'none';
 
-            ctx.fillStyle = '#050510';
-            ctx.fillRect(0, 0, width, height);
+            ctx.fillStyle = '#050510'; ctx.fillRect(0, 0, width, height);
 
             ctx.save();
             let camX = width / 2 - player.x; let camY = height / 2 - player.y;
-            // Screen Shake
-            if (isImpact) { camX += (Math.random()-0.5)*20; camY += (Math.random()-0.5)*20; }
+            if (isImpact || player.chargeTimer > 0) { camX += (Math.random()-0.5)*15; camY += (Math.random()-0.5)*15; }
             ctx.translate(camX, camY);
 
             // Draw Grid
@@ -407,56 +419,91 @@
             for (let y=sY; y<sY+height+grid; y+=grid) { ctx.moveTo(player.x-width, y); ctx.lineTo(player.x+width, y); }
             ctx.stroke();
 
-            // Draw Powerups
-            powerups.forEach(p => {
-                ctx.shadowBlur = 20; ctx.shadowColor = '#ffaa00'; ctx.fillStyle = '#ffaa00';
-                ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.8 + Math.sin(Date.now()/200)*0.2), 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = '#fff'; ctx.font = '20px Arial'; ctx.textAlign = 'center'; ctx.fillText('V', p.x, p.y+7);
-            });
-
             // Draw Particles & Lasers
             particles.forEach(p => { ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life); ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); });
             ctx.globalAlpha = 1.0;
-            lasers.forEach(l => { ctx.shadowBlur = 10; ctx.shadowColor = l.color; ctx.fillStyle = l.color; ctx.beginPath(); ctx.arc(l.x, l.y, 4, 0, Math.PI*2); ctx.fill(); });
+            
+            lasers.forEach(l => { 
+                ctx.shadowBlur = 15; ctx.shadowColor = l.color; ctx.fillStyle = l.color; 
+                if (l.isHyper) {
+                    ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(Math.atan2(l.vy, l.vx));
+                    ctx.fillRect(-l.size, -l.size/2, l.size*3, l.size);
+                    ctx.restore();
+                } else {
+                    ctx.beginPath(); ctx.arc(l.x, l.y, 4, 0, Math.PI*2); ctx.fill(); 
+                }
+            });
 
             // Draw Enemies
             enemies.forEach(e => {
                 ctx.save(); ctx.translate(e.x, e.y); ctx.shadowBlur = 15; ctx.shadowColor = '#f00';
                 ctx.strokeStyle = '#f00'; ctx.lineWidth = 3; ctx.beginPath();
-                ctx.moveTo(20, 0); ctx.lineTo(-10, 15); ctx.lineTo(-10, -15); ctx.closePath(); ctx.stroke(); ctx.restore();
+                ctx.moveTo(20, 0); ctx.lineTo(-10, 15); ctx.lineTo(-10, -15); ctx.closePath(); ctx.stroke(); 
+                if (isFearFreeze) { ctx.translate((Math.random()-0.5)*5, (Math.random()-0.5)*5); }
+                ctx.restore();
             });
 
             // Draw Super Blasts
             superBlasts.forEach(b => {
                 ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
-                ctx.fillStyle = `rgba(255, 170, 0, ${b.frame/60})`; ctx.fill();
-                ctx.lineWidth = 10 * (b.frame/60); ctx.strokeStyle = '#fff'; ctx.stroke();
+                ctx.fillStyle = `rgba(255, 255, 255, ${b.frame/60})`; ctx.fill();
+                ctx.lineWidth = 15 * (b.frame/60); ctx.strokeStyle = '#ffaa00'; ctx.stroke();
             });
 
             // Draw Players
-            if (peerPlayer.x !== -9999) drawShip(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, peerPlayer.isThrusting, peerPlayer.isSuperMode);
-            drawShip(player.x, player.y, player.angle, player.color, player.isThrusting, player.superModeTimer > 0);
+            if (peerPlayer.x !== -9999 && peerPlayer.role !== 'none') drawEntity(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, peerPlayer.isThrusting, peerPlayer.role, peerPlayer.chargeTimer);
+            if (player.role !== 'none') drawEntity(player.x, player.y, player.angle, player.color, player.isThrusting, player.role, player.chargeTimer);
 
             ctx.restore();
         }
 
-        function drawShip(x, y, angle, color, isThrusting, isSuper) {
+        function drawEntity(x, y, angle, color, isThrusting, role, chargeTimer) {
             ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
-            let glow = isSuper ? '#ffaa00' : color;
-            ctx.shadowBlur = isSuper ? 30 : 20; ctx.shadowColor = glow; ctx.strokeStyle = glow; ctx.lineWidth = isSuper ? 5 : 3; ctx.fillStyle = '#111';
             
-            ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(-15, 15); ctx.lineTo(-10, 0); ctx.lineTo(-15, -15); ctx.closePath();
-            ctx.fill(); ctx.stroke();
+            if (role === 'viltrumite') {
+                const colors = ['#f00', '#0f0', '#00f', '#ff0', '#f0f', '#0ff', '#fff'];
+                let glow = (chargeTimer > 0) ? colors[Math.floor(Date.now() / 50) % colors.length] : '#ffaa00';
+                ctx.shadowBlur = chargeTimer > 0 ? 40 : 25; ctx.shadowColor = glow;
+                
+                // Cape
+                ctx.fillStyle = '#ff0000';
+                ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-35, -15); ctx.lineTo(-30, 0); ctx.lineTo(-35, 15); ctx.fill();
+                // Body
+                ctx.fillStyle = '#ffcc00'; ctx.fillRect(-15, -6, 20, 12); 
+                ctx.fillStyle = '#0044ff'; ctx.fillRect(-10, -5, 10, 10); 
+                // Head
+                ctx.fillStyle = '#ffcc99'; 
+                ctx.beginPath(); ctx.arc(12, 0, 7, 0, Math.PI*2); ctx.fill();
+                // Fists
+                ctx.fillStyle = '#ffcc99';
+                ctx.beginPath(); ctx.arc(22, -8, 4, 0, Math.PI*2); ctx.fill(); 
+                ctx.beginPath(); ctx.arc(22, 8, 4, 0, Math.PI*2); ctx.fill(); 
+                // Aura
+                ctx.strokeStyle = glow; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(0, 0, 30 + Math.random()*5, 0, Math.PI*2); ctx.stroke();
 
-            if (isThrusting) {
-                ctx.fillStyle = '#fff'; ctx.shadowColor = glow;
-                ctx.beginPath(); ctx.moveTo(-12, -5); ctx.lineTo(isSuper ? -35 : -25, 0); ctx.lineTo(-12, 5); ctx.fill();
+            } else if (role === 'laser') {
+                ctx.shadowBlur = 20; ctx.shadowColor = '#00ffff'; ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 3; ctx.fillStyle = '#111';
+                ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(-15, 15); ctx.lineTo(-10, 0); ctx.lineTo(-15, -15); ctx.closePath();
+                ctx.fill(); ctx.stroke();
+
+                if (isThrusting) {
+                    ctx.fillStyle = '#fff'; ctx.shadowColor = '#00ffff';
+                    ctx.beginPath(); ctx.moveTo(-12, -5); ctx.lineTo(-25, 0); ctx.lineTo(-12, 5); ctx.fill();
+                }
             }
             ctx.restore();
         }
 
         function loop() { if (!gameRunning) return; update(); draw(); requestAnimationFrame(loop); }
-        function startGame() { gameRunning = true; player.x = isHost ? -100 : 100; requestAnimationFrame(loop); }
+        function startGame() { 
+            gameRunning = true; player.x = isHost ? -100 : 100; 
+            if (isHost) {
+                player.role = Math.random() > 0.5 ? 'viltrumite' : 'laser';
+                applyRoleStats(player);
+            }
+            requestAnimationFrame(loop); 
+        }
     </script>
 </body>
 </html>
