@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Vanguard: Asymmetric Co-Op</title>
+    <title>Neon Vanguard: The Invincible Update</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body, html {
@@ -69,7 +69,6 @@
         <h2>ASYMMETRIC CO-OP</h2>
         <p>Your Link ID:</p>
         <div id="my-id-display">Generating Link...</div>
-        <p>Roles are assigned at 50/50 randomly upon connection.</p>
         <input type="text" id="friend-id" placeholder="Wingman's ID">
         <button id="join-btn">Initiate Link</button>
         <p id="status"></p>
@@ -99,6 +98,10 @@
     <canvas id="gameCanvas"></canvas>
 
     <script>
+        // --- ASSET LOADING ---
+        const viltrumiteImg = new Image();
+        viltrumiteImg.src = 'viltrumite.png'; // Will use your custom photo if available
+
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         let width = canvas.width = window.innerWidth;
@@ -139,13 +142,12 @@
                     peerPlayer.isHyperLaser = data.phl;
                     peerPlayer.role = data.prole;
 
-                    // Role Assignment for Client
                     if (!isHost && player.role === 'none') {
                         player.role = data.prole === 'viltrumite' ? 'laser' : 'viltrumite';
                         applyRoleStats(player);
                     }
 
-                    if (data.fired) spawnLaser(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, false, data.phl);
+                    if (data.fired) spawnLaser(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, false, data.phl, peerPlayer.role === 'viltrumite');
                     
                     if (!isHost) {
                         enemies = data.enemies || [];
@@ -189,7 +191,7 @@
         });
 
         // --- GAME ENTITIES ---
-        let gameRunning = false; let sharedScore = 0;
+        let gameRunning = false; let sharedScore = 0; let tick = 0;
         
         const player = { 
             x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, color: '#0ff', 
@@ -202,51 +204,53 @@
         
         function applyRoleStats(p) {
             if (p.role === 'viltrumite') {
-                p.maxHealth = 500; p.health = 500;
+                p.maxHealth = 800; p.health = 800; // Massive health pool
             } else if (p.role === 'laser') {
-                p.maxHealth = 200; p.health = 200; // Buffed base health so they aren't one-shot
+                p.maxHealth = 200; p.health = 200; 
             }
             if (p === player) {
                 document.getElementById('btn-super').style.display = 'flex';
                 document.getElementById('super-text').style.display = 'block';
+                if(p.role === 'viltrumite') document.getElementById('btn-fire').innerText = "CLAP"; // Changed button text
             }
         }
 
         // --- LOGIC ---
         function tryFire() {
             if (player.cooldown <= 0 && player.chargeTimer <= 0) {
-                spawnLaser(player.x, player.y, player.angle, player.color, true, player.hyperLaserTimer > 0);
+                let isViltrumite = player.role === 'viltrumite';
+                spawnLaser(player.x, player.y, player.angle, player.color, true, player.hyperLaserTimer > 0, isViltrumite);
                 player.justFired = true;
-                player.cooldown = player.hyperLaserTimer > 0 ? 30 : (player.role === 'viltrumite' ? 10 : 15);
+                player.cooldown = player.hyperLaserTimer > 0 ? 30 : (isViltrumite ? 20 : 15);
             }
         }
 
         function trySuper() {
             if (player.superCooldown <= 0 && player.chargeTimer <= 0 && player.role !== 'none') {
-                if (player.role === 'viltrumite') {
-                    player.chargeTimer = 120; // 2 sec fear-freeze charge
-                } else if (player.role === 'laser') {
-                    player.hyperLaserTimer = 300; // 5 sec beam
-                }
-                player.superCooldown = 900; // 15 seconds cooldown at 60 FPS
+                if (player.role === 'viltrumite') { player.chargeTimer = 120; } 
+                else if (player.role === 'laser') { player.hyperLaserTimer = 300; }
+                player.superCooldown = 900; 
             }
         }
 
         function triggerSuperAnimation(x, y) {
-            superBlasts.push({ x: x, y: y, radius: 10, maxRadius: 1500, frame: 60 });
+            superBlasts.push({ x: x, y: y, radius: 10, maxRadius: 1800, frame: 60 });
         }
 
-        function spawnLaser(x, y, angle, color, isLocal, isHyper) {
-            if (isHyper) {
-                lasers.push({ x: x + Math.cos(angle)*40, y: y + Math.sin(angle)*40, vx: Math.cos(angle)*30, vy: Math.sin(angle)*30, color: '#00ffff', age: 0, isHyper: true, size: 40 });
+        function spawnLaser(x, y, angle, color, isLocal, isHyper, isSonicClap) {
+            if (isSonicClap) {
+                // Massive piercing wide crescent
+                lasers.push({ x: x + Math.cos(angle)*30, y: y + Math.sin(angle)*30, vx: Math.cos(angle)*25, vy: Math.sin(angle)*25, color: '#ffffff', age: 0, isHyper: false, isClap: true, size: 60, angle: angle });
+            } else if (isHyper) {
+                lasers.push({ x: x + Math.cos(angle)*40, y: y + Math.sin(angle)*40, vx: Math.cos(angle)*30, vy: Math.sin(angle)*30, color: '#00ffff', age: 0, isHyper: true, isClap: false, size: 40 });
             } else {
-                lasers.push({ x: x + Math.cos(angle)*20, y: y + Math.sin(angle)*20, vx: Math.cos(angle)*20, vy: Math.sin(angle)*20, color: color, age: 0, isHyper: false, size: 4 });
+                lasers.push({ x: x + Math.cos(angle)*20, y: y + Math.sin(angle)*20, vx: Math.cos(angle)*20, vy: Math.sin(angle)*20, color: color, age: 0, isHyper: false, isClap: false, size: 4 });
             }
         }
 
         function spawnExplosion(x, y, color) {
-            for(let i=0; i<15; i++) {
-                particles.push({ x: x, y: y, vx: (Math.random()-0.5)*10, vy: (Math.random()-0.5)*10, life: 1.0, decay: 0.05, color: color });
+            for(let i=0; i<20; i++) {
+                particles.push({ x: x, y: y, vx: (Math.random()-0.5)*15, vy: (Math.random()-0.5)*15, life: 1.0, decay: 0.04, color: color });
             }
         }
 
@@ -277,25 +281,29 @@
         }
 
         function update() {
-            // Charging Super freezes movement (Viltrumite only)
+            tick++;
+            // Passive Regeneration for Viltrumite
+            if (player.role === 'viltrumite' && player.health < player.maxHealth && tick % 15 === 0) {
+                player.health += 2; 
+            }
+
             if (player.chargeTimer > 0) {
                 player.chargeTimer--;
                 player.vx *= 0.8; player.vy *= 0.8; 
-                
                 if (player.chargeTimer === 1) {
                     triggerSuperAnimation(player.x, player.y);
                     if (conn && conn.open) conn.send({ type: 'super_trigger', x: player.x, y: player.y });
                 }
             } else {
-                let turnSpeed = player.role === 'viltrumite' ? 0.12 : 0.08;
-                let accel = player.role === 'viltrumite' ? 0.7 : 0.4;
+                let turnSpeed = player.role === 'viltrumite' ? 0.14 : 0.08; // Viltrumite turns faster
+                let accel = player.role === 'viltrumite' ? 0.9 : 0.4; // Viltrumite accelerates massively
 
                 if (keys.left) player.angle -= turnSpeed;
                 if (keys.right) player.angle += turnSpeed;
 
                 player.isThrusting = keys.gas;
                 if (keys.gas) { player.vx += Math.cos(player.angle) * accel; player.vy += Math.sin(player.angle) * accel; }
-                if (keys.brake) { player.vx *= 0.85; player.vy *= 0.85; } else { player.vx *= 0.98; player.vy *= 0.98; }
+                if (keys.brake) { player.vx *= 0.80; player.vy *= 0.80; } else { player.vx *= 0.96; player.vy *= 0.96; }
             }
 
             player.x += player.vx; player.y += player.vy;
@@ -303,42 +311,51 @@
             if(player.superCooldown > 0) player.superCooldown--;
             if(player.hyperLaserTimer > 0) player.hyperLaserTimer--;
 
-            // Engine Exhaust Particles
-            if (player.isThrusting && Math.random() > 0.3) {
+            if (player.isThrusting && Math.random() > 0.2) {
                 let exhaustColor = player.role === 'viltrumite' ? '#ffaa00' : player.color;
                 particles.push({ x: player.x - Math.cos(player.angle)*20, y: player.y - Math.sin(player.angle)*20, vx: -player.vx*0.2, vy: -player.vy*0.2, life: 1.0, decay: 0.1, color: exhaustColor });
             }
 
-            // Update Super Blasts
             for(let i = superBlasts.length -1; i >= 0; i--) {
                 let b = superBlasts[i]; b.radius += (b.maxRadius - b.radius) * 0.15; b.frame--;
                 if (isHost) {
                     for (let j = enemies.length - 1; j >= 0; j--) {
                         if (Math.hypot(b.x - enemies[j].x, b.y - enemies[j].y) < b.radius) {
-                            spawnExplosion(enemies[j].x, enemies[j].y, '#f00'); enemies.splice(j, 1); sharedScore += 50;
+                            spawnExplosion(enemies[j].x, enemies[j].y, enemies[j].type === 'brute' ? '#a020f0' : '#f00'); 
+                            enemies.splice(j, 1); sharedScore += 50;
                         }
                     }
                 }
                 if (b.frame <= 0) superBlasts.splice(i, 1);
             }
 
-            // Update Lasers
             for (let i = lasers.length - 1; i >= 0; i--) {
                 let l = lasers[i]; l.x += l.vx; l.y += l.vy; l.age++;
-                if (l.age > (l.isHyper ? 60 : 100)) { lasers.splice(i, 1); continue; }
+                if (l.age > (l.isHyper ? 60 : (l.isClap ? 40 : 100))) { lasers.splice(i, 1); continue; }
+                
                 if (isHost) {
                     for (let j = enemies.length - 1; j >= 0; j--) {
-                        let hitDist = l.isHyper ? l.size + 10 : enemies[j].size;
+                        let hitDist = (l.isHyper || l.isClap) ? l.size + 15 : enemies[j].size;
                         if (Math.hypot(l.x - enemies[j].x, l.y - enemies[j].y) < hitDist) {
-                            spawnExplosion(enemies[j].x, enemies[j].y, '#f00');
-                            enemies.splice(j, 1); sharedScore += 100;
-                            if (!l.isHyper) { lasers.splice(i, 1); break; }
+                            
+                            // Laser Damage Logic
+                            enemies[j].hp -= (l.isHyper ? 5 : (l.isClap ? 3 : 1));
+                            
+                            if (enemies[j].hp <= 0) {
+                                spawnExplosion(enemies[j].x, enemies[j].y, enemies[j].type === 'brute' ? '#a020f0' : '#f00');
+                                sharedScore += (enemies[j].type === 'brute' ? 150 : 50);
+                                enemies.splice(j, 1); 
+                            } else {
+                                // Hit feedback
+                                spawnExplosion(l.x, l.y, '#fff');
+                            }
+
+                            if (!l.isHyper && !l.isClap) { lasers.splice(i, 1); break; } // Claps and Hyper pierce!
                         }
                     }
                 }
             }
 
-            // Update Particles
             for (let i = particles.length - 1; i >= 0; i--) {
                 particles[i].x += particles[i].vx; particles[i].y += particles[i].vy;
                 particles[i].life -= particles[i].decay; if (particles[i].life <= 0) particles.splice(i, 1);
@@ -346,11 +363,17 @@
 
             let isFearFreeze = player.chargeTimer > 0 || peerPlayer.chargeTimer > 0;
 
-            // Host Logic (Enemies)
             if (isHost) {
-                if (Math.random() < 0.04 && enemies.length < 50 && !isFearFreeze) {
+                // Enhanced Enemy Spawning
+                if (Math.random() < 0.05 && enemies.length < 60 && !isFearFreeze) {
                     let t = Math.random() > 0.5 ? player : peerPlayer;
-                    enemies.push({ x: t.x + Math.cos(Math.random()*Math.PI*2)*1200, y: t.y + Math.sin(Math.random()*Math.PI*2)*1200, size: 20, targetId: t === player ? 'host' : 'client' });
+                    let rand = Math.random();
+                    let eType = 'drone'; let eSize = 20; let eHp = 1; let eSpeed = 4.5;
+                    
+                    if (rand > 0.85) { eType = 'brute'; eSize = 45; eHp = 5; eSpeed = 1.5; } // Big tanks
+                    else if (rand > 0.70) { eType = 'seeker'; eSize = 15; eHp = 1; eSpeed = 6.5; } // Fast swarms
+
+                    enemies.push({ x: t.x + Math.cos(Math.random()*Math.PI*2)*1200, y: t.y + Math.sin(Math.random()*Math.PI*2)*1200, size: eSize, hp: eHp, speed: eSpeed, type: eType, targetId: t === player ? 'host' : 'client' });
                 }
 
                 if (!isFearFreeze) {
@@ -358,23 +381,41 @@
                         let e = enemies[i];
                         let target = e.targetId === 'host' ? player : peerPlayer;
                         let angle = Math.atan2(target.y - e.y, target.x - e.x);
-                        e.x += Math.cos(angle) * 4; e.y += Math.sin(angle) * 4;
+                        e.x += Math.cos(angle) * e.speed; e.y += Math.sin(angle) * e.speed;
 
                         let dHost = Math.hypot(player.x - e.x, player.y - e.y);
                         let dClient = Math.hypot(peerPlayer.x - e.x, peerPlayer.y - e.y);
                         
-                        if (dHost < 30) {
-                            player.health -= 15;
-                            spawnExplosion(e.x, e.y, '#f00'); enemies.splice(i, 1);
-                        } else if (dClient < 30) {
-                            peerPlayer.health -= 15;
-                            spawnExplosion(e.x, e.y, '#f00'); enemies.splice(i, 1);
+                        // Collision Logic for Host
+                        if (dHost < e.size + 15) {
+                            if (player.role === 'viltrumite') {
+                                // RAMMING LOGIC
+                                if (e.type === 'brute') player.health -= 15; // Takes a little damage from big guys
+                                // Insta-kill enemy
+                                spawnExplosion(e.x, e.y, e.type === 'brute' ? '#a020f0' : '#f00');
+                                sharedScore += (e.type === 'brute' ? 150 : 50);
+                                enemies.splice(i, 1);
+                            } else {
+                                player.health -= (e.type === 'brute' ? 40 : 15);
+                                spawnExplosion(e.x, e.y, e.type === 'brute' ? '#a020f0' : '#f00'); 
+                                enemies.splice(i, 1);
+                            }
+                        } else if (dClient < e.size + 15) {
+                            if (peerPlayer.role === 'viltrumite') {
+                                if (e.type === 'brute') peerPlayer.health -= 15; 
+                                spawnExplosion(e.x, e.y, e.type === 'brute' ? '#a020f0' : '#f00');
+                                sharedScore += (e.type === 'brute' ? 150 : 50);
+                                enemies.splice(i, 1);
+                            } else {
+                                peerPlayer.health -= (e.type === 'brute' ? 40 : 15);
+                                spawnExplosion(e.x, e.y, e.type === 'brute' ? '#a020f0' : '#f00'); 
+                                enemies.splice(i, 1);
+                            }
                         }
                     }
                 }
             }
 
-            // Death & Respawn
             if (player.health <= 0) {
                 player.health = player.maxHealth; player.x = 0; player.y = 0; player.vx = 0; player.vy = 0;
                 sharedScore = Math.max(0, sharedScore - 500);
@@ -382,7 +423,6 @@
 
             updateUI();
 
-            // Network Sync
             if (conn && conn.open) {
                 let packet = {
                     type: 'state', px: player.x, py: player.y, pa: player.angle, pc: player.color,
@@ -411,7 +451,6 @@
             if (isImpact || player.chargeTimer > 0) { camX += (Math.random()-0.5)*15; camY += (Math.random()-0.5)*15; }
             ctx.translate(camX, camY);
 
-            // Draw Grid
             ctx.strokeStyle = 'rgba(0, 255, 255, 0.1)'; ctx.lineWidth = 2;
             const grid = 150; const sX = Math.floor((player.x - width/2)/grid)*grid; const sY = Math.floor((player.y - height/2)/grid)*grid;
             ctx.beginPath();
@@ -419,7 +458,6 @@
             for (let y=sY; y<sY+height+grid; y+=grid) { ctx.moveTo(player.x-width, y); ctx.lineTo(player.x+width, y); }
             ctx.stroke();
 
-            // Draw Particles & Lasers
             particles.forEach(p => { ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life); ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); });
             ctx.globalAlpha = 1.0;
             
@@ -429,28 +467,41 @@
                     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(Math.atan2(l.vy, l.vx));
                     ctx.fillRect(-l.size, -l.size/2, l.size*3, l.size);
                     ctx.restore();
+                } else if (l.isClap) {
+                    // Draw crescent sonic wave
+                    ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.angle);
+                    ctx.beginPath(); ctx.arc(0, 0, l.size, -Math.PI/2, Math.PI/2); ctx.lineWidth = 10; ctx.strokeStyle = '#fff'; ctx.stroke();
+                    ctx.restore();
                 } else {
                     ctx.beginPath(); ctx.arc(l.x, l.y, 4, 0, Math.PI*2); ctx.fill(); 
                 }
             });
 
-            // Draw Enemies
             enemies.forEach(e => {
-                ctx.save(); ctx.translate(e.x, e.y); ctx.shadowBlur = 15; ctx.shadowColor = '#f00';
-                ctx.strokeStyle = '#f00'; ctx.lineWidth = 3; ctx.beginPath();
-                ctx.moveTo(20, 0); ctx.lineTo(-10, 15); ctx.lineTo(-10, -15); ctx.closePath(); ctx.stroke(); 
+                ctx.save(); ctx.translate(e.x, e.y); 
+                let eColor = e.type === 'brute' ? '#a020f0' : (e.type === 'seeker' ? '#ffaa00' : '#f00');
+                ctx.shadowBlur = 15; ctx.shadowColor = eColor;
+                ctx.strokeStyle = eColor; ctx.lineWidth = 3; 
+                
+                if (e.type === 'brute') {
+                    ctx.beginPath(); ctx.rect(-20, -20, 40, 40); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(-20,-20); ctx.lineTo(20,20); ctx.moveTo(20,-20); ctx.lineTo(-20,20); ctx.stroke(); // inner X
+                } else if (e.type === 'seeker') {
+                    ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-8, 8); ctx.lineTo(-8, -8); ctx.closePath(); ctx.stroke(); 
+                } else {
+                    ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(-10, 15); ctx.lineTo(-10, -15); ctx.closePath(); ctx.stroke(); 
+                }
+                
                 if (isFearFreeze) { ctx.translate((Math.random()-0.5)*5, (Math.random()-0.5)*5); }
                 ctx.restore();
             });
 
-            // Draw Super Blasts
             superBlasts.forEach(b => {
                 ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
                 ctx.fillStyle = `rgba(255, 255, 255, ${b.frame/60})`; ctx.fill();
                 ctx.lineWidth = 15 * (b.frame/60); ctx.strokeStyle = '#ffaa00'; ctx.stroke();
             });
 
-            // Draw Players
             if (peerPlayer.x !== -9999 && peerPlayer.role !== 'none') drawEntity(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, peerPlayer.isThrusting, peerPlayer.role, peerPlayer.chargeTimer);
             if (player.role !== 'none') drawEntity(player.x, player.y, player.angle, player.color, player.isThrusting, player.role, player.chargeTimer);
 
@@ -465,22 +516,14 @@
                 let glow = (chargeTimer > 0) ? colors[Math.floor(Date.now() / 50) % colors.length] : '#ffaa00';
                 ctx.shadowBlur = chargeTimer > 0 ? 40 : 25; ctx.shadowColor = glow;
                 
-                // Cape
-                ctx.fillStyle = '#ff0000';
-                ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-35, -15); ctx.lineTo(-30, 0); ctx.lineTo(-35, 15); ctx.fill();
-                // Body
-                ctx.fillStyle = '#ffcc00'; ctx.fillRect(-15, -6, 20, 12); 
-                ctx.fillStyle = '#0044ff'; ctx.fillRect(-10, -5, 10, 10); 
-                // Head
-                ctx.fillStyle = '#ffcc99'; 
-                ctx.beginPath(); ctx.arc(12, 0, 7, 0, Math.PI*2); ctx.fill();
-                // Fists
-                ctx.fillStyle = '#ffcc99';
-                ctx.beginPath(); ctx.arc(22, -8, 4, 0, Math.PI*2); ctx.fill(); 
-                ctx.beginPath(); ctx.arc(22, 8, 4, 0, Math.PI*2); ctx.fill(); 
-                // Aura
+                if (viltrumiteImg.complete && viltrumiteImg.naturalHeight !== 0) {
+                    ctx.drawImage(viltrumiteImg, -30, -30, 60, 60);
+                } else {
+                    ctx.fillStyle = '#ffaa00'; ctx.fillRect(-20, -20, 40, 40);
+                }
+
                 ctx.strokeStyle = glow; ctx.lineWidth = 2;
-                ctx.beginPath(); ctx.arc(0, 0, 30 + Math.random()*5, 0, Math.PI*2); ctx.stroke();
+                ctx.beginPath(); ctx.arc(0, 0, 40 + Math.random()*5, 0, Math.PI*2); ctx.stroke();
 
             } else if (role === 'laser') {
                 ctx.shadowBlur = 20; ctx.shadowColor = '#00ffff'; ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 3; ctx.fillStyle = '#111';
