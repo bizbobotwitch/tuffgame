@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Co-Op Vanguard</title>
+    <title>Neon Co-Op Vanguard: Invincible Update</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body, html {
@@ -16,20 +16,15 @@
         
         /* UI Menus */
         #menu {
-            position: absolute; top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(10, 10, 20, 0.9); padding: 30px;
-            border: 2px solid #0ff; border-radius: 15px;
-            box-shadow: 0 0 20px #0ff;
+            border: 2px solid #0ff; border-radius: 15px; box-shadow: 0 0 20px #0ff;
             text-align: center; width: 320px; z-index: 10;
         }
         h2 { color: #f0f; text-shadow: 0 0 10px #f0f; margin-top: 0; }
         input, button {
-            width: 90%; padding: 12px; margin: 10px 0;
-            background: #111; color: #0ff;
-            border: 1px solid #0ff; border-radius: 8px;
-            font-family: inherit; font-size: 16px;
-            box-shadow: 0 0 5px #0ff inset;
+            width: 90%; padding: 12px; margin: 10px 0; background: #111; color: #0ff;
+            border: 1px solid #0ff; border-radius: 8px; font-family: inherit; font-size: 16px;
         }
         button { cursor: pointer; font-weight: bold; transition: 0.2s; }
         button:active { background: #0ff; color: #000; }
@@ -38,16 +33,21 @@
         /* Shared HUD */
         #hud {
             position: absolute; top: 20px; left: 0; width: 100%;
-            text-align: center; font-size: 24px; font-weight: bold;
+            text-align: center; font-size: 20px; font-weight: bold;
             color: #fff; text-shadow: 0 0 10px #fff; pointer-events: none;
             display: none; z-index: 5;
         }
+        .health-bar-container {
+            width: 200px; height: 15px; border: 2px solid #fff; 
+            margin: 10px auto; border-radius: 10px; overflow: hidden;
+        }
+        #health-bar { width: 100%; height: 100%; background: #0f0; transition: width 0.2s, background 0.2s; }
 
         /* Mobile Controls */
         #controls {
             position: absolute; bottom: 30px; left: 0; width: 100%;
-            display: none; justify-content: space-between;
-            padding: 0 20px; box-sizing: border-box; pointer-events: none; z-index: 5;
+            display: none; justify-content: space-between; padding: 0 20px; box-sizing: border-box;
+            pointer-events: none; z-index: 5;
         }
         .control-group { display: flex; gap: 15px; pointer-events: auto; }
         .control-group-col { display: flex; flex-direction: column; gap: 10px; pointer-events: auto; }
@@ -56,13 +56,12 @@
             background: rgba(0, 255, 255, 0.1); border: 2px solid #0ff;
             color: #0ff; font-weight: bold; display: flex;
             align-items: center; justify-content: center; user-select: none;
-            box-shadow: 0 0 10px #0ff inset, 0 0 10px #0ff;
         }
         .btn:active { background: rgba(0, 255, 255, 0.5); }
-        .btn-action { border-color: #f0f; color: #f0f; box-shadow: 0 0 10px #f0f inset, 0 0 10px #f0f; }
-        .btn-action:active { background: rgba(255, 0, 255, 0.5); }
-        .btn-brake { border-color: #ff3333; color: #ff3333; box-shadow: 0 0 10px #ff3333 inset, 0 0 10px #ff3333; }
-        .btn-brake:active { background: rgba(255, 51, 51, 0.5); }
+        .btn-action { border-color: #f0f; color: #f0f; }
+        .btn-super { border-color: #ffaa00; color: #ffaa00; display: none; box-shadow: 0 0 15px #ffaa00; }
+        .btn-super:active { background: rgba(255, 170, 0, 0.5); }
+        .btn-brake { border-color: #ff3333; color: #ff3333; }
     </style>
 </head>
 <body>
@@ -77,7 +76,11 @@
         <p id="status"></p>
     </div>
 
-    <div id="hud">SCORE: <span id="scoreDisplay">0</span></div>
+    <div id="hud">
+        SCORE: <span id="scoreDisplay">0</span>
+        <div class="health-bar-container"><div id="health-bar"></div></div>
+        <div id="super-text" style="color: #ffaa00; display: none; animation: flash 0.5s infinite;">VILTRUM MODE ACTIVE</div>
+    </div>
 
     <div id="controls">
         <div class="control-group" style="align-items: flex-end;">
@@ -86,6 +89,7 @@
         </div>
         <div class="control-group">
             <div class="control-group-col">
+                <div class="btn btn-super" id="btn-super">SUPER</div>
                 <div class="btn btn-action" id="btn-fire">FIRE</div>
                 <div class="btn btn-brake" id="btn-brake">STOP</div>
             </div>
@@ -96,348 +100,363 @@
     <canvas id="gameCanvas"></canvas>
 
     <script>
-        // --- GAME ENGINE SETUP ---
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         let width = canvas.width = window.innerWidth;
         let height = canvas.height = window.innerHeight;
 
-        window.addEventListener('resize', () => {
-            width = canvas.width = window.innerWidth;
-            height = canvas.height = window.innerHeight;
-        });
+        window.addEventListener('resize', () => { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; });
 
         // --- P2P NETWORK SETUP ---
         const peer = new Peer();
-        let conn = null;
-        let isHost = false;
+        let conn = null; let isHost = false;
+        
+        peer.on('open', id => document.getElementById('my-id-display').innerText = id);
+        peer.on('connection', connection => { conn = connection; isHost = true; setupConnection(); });
 
-        const myIdDisplay = document.getElementById('my-id-display');
-        const friendIdInput = document.getElementById('friend-id');
-        const joinBtn = document.getElementById('join-btn');
-        const statusText = document.getElementById('status');
-        const menu = document.getElementById('menu');
-        const controls = document.getElementById('controls');
-        const hud = document.getElementById('hud');
-        const scoreDisplay = document.getElementById('scoreDisplay');
-
-        peer.on('open', id => myIdDisplay.innerText = id);
-
-        peer.on('connection', connection => {
-            conn = connection;
-            isHost = true;
-            setupConnection();
-        });
-
-        joinBtn.addEventListener('click', () => {
-            const friendId = friendIdInput.value.trim();
+        document.getElementById('join-btn').addEventListener('click', () => {
+            const friendId = document.getElementById('friend-id').value.trim();
             if (!friendId) return;
-            statusText.innerText = "Linking...";
+            document.getElementById('status').innerText = "Linking...";
             conn = peer.connect(friendId);
             setupConnection();
         });
 
         function setupConnection() {
             conn.on('open', () => {
-                menu.style.display = 'none';
-                controls.style.display = 'flex';
-                hud.style.display = 'block';
-                if (isHost) player.color = '#0ff'; // Host is Cyan
-                else player.color = '#f0f'; // Client is Magenta
+                document.getElementById('menu').style.display = 'none';
+                document.getElementById('controls').style.display = 'flex';
+                document.getElementById('hud').style.display = 'block';
+                player.color = isHost ? '#0ff' : '#f0f';
                 startGame();
             });
 
             conn.on('data', data => {
                 if (data.type === 'state') {
-                    // Sync peer player
                     peerPlayer.x = data.px; peerPlayer.y = data.py;
                     peerPlayer.angle = data.pa; peerPlayer.color = data.pc;
-                    peerPlayer.isThrusting = data.pt;
-                    
-                    // Sync peer lasers
+                    peerPlayer.isThrusting = data.pt; peerPlayer.isSuperMode = data.psup;
                     if (data.fired) spawnLaser(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, false);
                     
-                    // Sync game state from host
-                    if (!isHost && data.enemies) enemies = data.enemies;
-                    if (!isHost && data.score !== undefined) sharedScore = data.score;
+                    if (!isHost) {
+                        enemies = data.enemies || [];
+                        powerups = data.powerups || [];
+                        sharedScore = data.score !== undefined ? data.score : sharedScore;
+                        player.health = data.p2h; // Host tells Client its health
+                    }
+                } else if (data.type === 'super_trigger') {
+                    triggerSuperAnimation(data.x, data.y);
                 }
             });
         }
 
         // --- INPUT HANDLING ---
-        const keys = { left: false, right: false, gas: false, brake: false, fire: false };
+        const keys = { left: false, right: false, gas: false, brake: false, fire: false, super: false };
         const bindBtn = (id, key) => {
             const el = document.getElementById(id);
-            el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; });
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; if(key==='super') trySuper(); });
             el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; });
-            el.addEventListener('mousedown', () => keys[key] = true);
+            el.addEventListener('mousedown', () => { keys[key] = true; if(key==='super') trySuper(); });
             el.addEventListener('mouseup', () => keys[key] = false);
         };
         bindBtn('btn-left', 'left'); bindBtn('btn-right', 'right');
-        bindBtn('btn-gas', 'gas'); bindBtn('btn-brake', 'brake');
+        bindBtn('btn-gas', 'gas'); bindBtn('btn-brake', 'brake'); bindBtn('btn-super', 'super');
         
         document.getElementById('btn-fire').addEventListener('touchstart', (e) => { e.preventDefault(); tryFire(); });
         document.getElementById('btn-fire').addEventListener('mousedown', () => tryFire());
 
-        // Keyboard backup for testing on PC
         window.addEventListener('keydown', e => {
             if(e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
             if(e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
             if(e.key === 'ArrowUp' || e.key === 'w') keys.gas = true;
             if(e.key === 'ArrowDown' || e.key === 's') keys.brake = true;
             if(e.key === ' ') tryFire();
+            if(e.key === 'Shift') trySuper();
         });
         window.addEventListener('keyup', e => {
-            if(e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
-            if(e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
-            if(e.key === 'ArrowUp' || e.key === 'w') keys.gas = false;
-            if(e.key === 'ArrowDown' || e.key === 's') keys.brake = false;
+            if(['ArrowLeft','a','ArrowRight','d','ArrowUp','w','ArrowDown','s'].includes(e.key)) keys[e.key==='ArrowUp'||e.key==='w'?'gas':e.key==='ArrowDown'||e.key==='s'?'brake':e.key==='ArrowLeft'||e.key==='a'?'left':'right'] = false;
         });
 
         // --- GAME ENTITIES ---
-        let gameRunning = false;
-        let sharedScore = 0;
+        let gameRunning = false; let sharedScore = 0;
         
-        const player = { x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, color: '#0ff', isThrusting: false, justFired: false, cooldown: 0 };
-        const peerPlayer = { x: -9999, y: -9999, angle: 0, color: '#f0f', isThrusting: false };
+        const player = { 
+            x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, color: '#0ff', 
+            isThrusting: false, justFired: false, cooldown: 0,
+            health: 100, maxHealth: 100, superModeTimer: 0
+        };
+        const peerPlayer = { x: -9999, y: -9999, angle: 0, color: '#f0f', health: 100, isSuperMode: false };
         
-        let lasers = [];
-        let enemies = [];
-        let particles = [];
-
+        let lasers = []; let enemies = []; let particles = []; let powerups = []; let superBlasts = [];
+        
+        // --- LOGIC ---
         function tryFire() {
             if (player.cooldown <= 0) {
                 spawnLaser(player.x, player.y, player.angle, player.color, true);
                 player.justFired = true;
-                player.cooldown = 15; // Frames before next shot
+                player.cooldown = player.superModeTimer > 0 ? 5 : 15; // Faster fire in super mode
             }
         }
 
+        function trySuper() {
+            if (player.superModeTimer > 0) {
+                triggerSuperAnimation(player.x, player.y);
+                if (conn && conn.open) conn.send({ type: 'super_trigger', x: player.x, y: player.y });
+                player.superModeTimer = 0; // Consume power mode
+                document.getElementById('btn-super').style.display = 'none';
+                document.getElementById('super-text').style.display = 'none';
+            }
+        }
+
+        function triggerSuperAnimation(x, y) {
+            superBlasts.push({ x: x, y: y, radius: 10, maxRadius: 1200, frame: 60 });
+        }
+
         function spawnLaser(x, y, angle, color, isLocal) {
-            // Offset laser to spawn at the nose of the ship
-            const nx = x + Math.cos(angle) * 20;
-            const ny = y + Math.sin(angle) * 20;
-            lasers.push({ x: nx, y: ny, vx: Math.cos(angle) * 20, vy: Math.sin(angle) * 20, color: color, isLocal: isLocal, age: 0 });
+            lasers.push({ x: x + Math.cos(angle)*20, y: y + Math.sin(angle)*20, vx: Math.cos(angle)*20, vy: Math.sin(angle)*20, color: color, age: 0 });
         }
 
         function spawnExplosion(x, y, color) {
             for(let i=0; i<15; i++) {
-                particles.push({
-                    x: x, y: y,
-                    vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10,
-                    life: 1.0, decay: Math.random() * 0.05 + 0.02, color: color
-                });
+                particles.push({ x: x, y: y, vx: (Math.random()-0.5)*10, vy: (Math.random()-0.5)*10, life: 1.0, decay: 0.05, color: color });
             }
         }
 
-        // --- GAME LOGIC ---
+        function updateUI() {
+            document.getElementById('scoreDisplay').innerText = sharedScore;
+            const hpBar = document.getElementById('health-bar');
+            hpBar.style.width = Math.max(0, (player.health / player.maxHealth) * 100) + "%";
+            hpBar.style.background = player.health > 250 ? '#ffaa00' : (player.health > 30 ? '#0f0' : '#f00');
+        }
+
         function update() {
-            // Physics & Movement
-            if (keys.left) player.angle -= 0.08;
-            if (keys.right) player.angle += 0.08;
+            // Physics & Movement adjustments based on Super Mode
+            let turnSpeed = player.superModeTimer > 0 ? 0.12 : 0.08;
+            let accel = player.superModeTimer > 0 ? 0.8 : 0.4;
+
+            if (keys.left) player.angle -= turnSpeed;
+            if (keys.right) player.angle += turnSpeed;
 
             player.isThrusting = keys.gas;
-            if (keys.gas) {
-                player.vx += Math.cos(player.angle) * 0.4;
-                player.vy += Math.sin(player.angle) * 0.4;
-            }
-            if (keys.brake) {
-                player.vx *= 0.85; // Heavy friction for stopping
-                player.vy *= 0.85;
-            } else {
-                player.vx *= 0.98; // Normal space drag
-                player.vy *= 0.98;
-            }
+            if (keys.gas) { player.vx += Math.cos(player.angle) * accel; player.vy += Math.sin(player.angle) * accel; }
+            if (keys.brake) { player.vx *= 0.85; player.vy *= 0.85; } else { player.vx *= 0.98; player.vy *= 0.98; }
 
-            player.x += player.vx;
-            player.y += player.vy;
+            player.x += player.vx; player.y += player.vy;
             if(player.cooldown > 0) player.cooldown--;
-
-            // Engine Exhaust Particles
-            if (player.isThrusting && Math.random() > 0.5) {
-                particles.push({
-                    x: player.x - Math.cos(player.angle) * 20, y: player.y - Math.sin(player.angle) * 20,
-                    vx: -player.vx * 0.2 + (Math.random()-0.5), vy: -player.vy * 0.2 + (Math.random()-0.5),
-                    life: 1.0, decay: 0.1, color: '#ffaa00'
-                });
+            
+            if (player.superModeTimer > 0) {
+                player.superModeTimer--;
+                if (player.superModeTimer <= 0) {
+                    player.maxHealth = 100;
+                    if(player.health > 100) player.health = 100; // Lose excess health when it wears off
+                    document.getElementById('btn-super').style.display = 'none';
+                    document.getElementById('super-text').style.display = 'none';
+                } else if (Math.random() > 0.5) {
+                    // Super aura particles
+                    particles.push({ x: player.x + (Math.random()-0.5)*40, y: player.y + (Math.random()-0.5)*40, vx: 0, vy: 0, life: 1.0, decay: 0.1, color: '#ffaa00' });
+                }
             }
 
-            // Update Lasers
-            for (let i = lasers.length - 1; i >= 0; i--) {
-                let l = lasers[i];
-                l.x += l.vx; l.y += l.vy; l.age++;
-                if (l.age > 100) { lasers.splice(i, 1); continue; }
+            // Engine Exhaust
+            if (player.isThrusting) particles.push({ x: player.x - Math.cos(player.angle)*20, y: player.y - Math.sin(player.angle)*20, vx: -player.vx*0.2, vy: -player.vy*0.2, life: 1.0, decay: 0.1, color: player.superModeTimer > 0 ? '#ffaa00' : '#0ff' });
 
-                // Host checks collision between lasers and enemies
+            // Update Super Blasts
+            for(let i = superBlasts.length -1; i >= 0; i--) {
+                let b = superBlasts[i];
+                b.radius += (b.maxRadius - b.radius) * 0.15;
+                b.frame--;
+                if (isHost) {
+                    // Host kills enemies inside blast
+                    for (let j = enemies.length - 1; j >= 0; j--) {
+                        if (Math.hypot(b.x - enemies[j].x, b.y - enemies[j].y) < b.radius) {
+                            spawnExplosion(enemies[j].x, enemies[j].y, '#f00');
+                            enemies.splice(j, 1); sharedScore += 50;
+                        }
+                    }
+                }
+                if (b.frame <= 0) superBlasts.splice(i, 1);
+            }
+
+            // Update Lasers & Particles
+            for (let i = lasers.length - 1; i >= 0; i--) {
+                let l = lasers[i]; l.x += l.vx; l.y += l.vy; l.age++;
+                if (l.age > 100) { lasers.splice(i, 1); continue; }
                 if (isHost) {
                     for (let j = enemies.length - 1; j >= 0; j--) {
-                        let e = enemies[j];
-                        if (Math.hypot(l.x - e.x, l.y - e.y) < e.size) {
-                            spawnExplosion(e.x, e.y, '#ff0000');
-                            enemies.splice(j, 1);
-                            lasers.splice(i, 1);
-                            sharedScore += 100;
-                            break; // Laser destroyed, move to next laser
+                        if (Math.hypot(l.x - enemies[j].x, l.y - enemies[j].y) < enemies[j].size) {
+                            spawnExplosion(enemies[j].x, enemies[j].y, '#f00');
+                            enemies.splice(j, 1); lasers.splice(i, 1); sharedScore += 100; break;
                         }
                     }
                 }
             }
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].x += particles[i].vx; particles[i].y += particles[i].vy;
+                particles[i].life -= particles[i].decay; if (particles[i].life <= 0) particles.splice(i, 1);
+            }
 
-            // Host Enemy Logic (Spawning & AI)
+            // Host Only Logic: Spawning & Collisions
             if (isHost) {
-                // Spawn enemies periodically
-                if (Math.random() < 0.02 && enemies.length < 20) {
-                    let spawnDist = 1000;
-                    let spawnAngle = Math.random() * Math.PI * 2;
-                    // Target either player 1 or 2 randomly
-                    let target = Math.random() > 0.5 ? player : peerPlayer;
-                    enemies.push({
-                        x: target.x + Math.cos(spawnAngle) * spawnDist,
-                        y: target.y + Math.sin(spawnAngle) * spawnDist,
-                        size: 20,
-                        targetId: target === player ? 'host' : 'client'
-                    });
+                // Spawning Enemies
+                if (Math.random() < 0.03 && enemies.length < 30) {
+                    let t = Math.random() > 0.5 ? player : peerPlayer;
+                    enemies.push({ x: t.x + Math.cos(Math.random()*Math.PI*2)*1000, y: t.y + Math.sin(Math.random()*Math.PI*2)*1000, size: 20, targetId: t === player ? 'host' : 'client' });
                 }
 
-                // Move enemies toward their target
-                enemies.forEach(e => {
+                // Spawning Power-ups (Chance: ~1/200 per second. At 60fps, 1/(60*200) = 0.00008, let's make it a bit more common for testing, ~0.001)
+                if (Math.random() < 0.001 && powerups.length < 3) {
+                    let t = Math.random() > 0.5 ? player : peerPlayer;
+                    powerups.push({ x: t.x + (Math.random()-0.5)*1500, y: t.y + (Math.random()-0.5)*1500, size: 25 });
+                }
+
+                // Enemy AI & Player Collision
+                for(let i = enemies.length - 1; i >= 0; i--) {
+                    let e = enemies[i];
                     let target = e.targetId === 'host' ? player : peerPlayer;
-                    let angleToTarget = Math.atan2(target.y - e.y, target.x - e.x);
-                    e.x += Math.cos(angleToTarget) * 3;
-                    e.y += Math.sin(angleToTarget) * 3;
-                });
+                    let angle = Math.atan2(target.y - e.y, target.x - e.x);
+                    e.x += Math.cos(angle) * 4; e.y += Math.sin(angle) * 4;
+
+                    // Collision with players
+                    let dHost = Math.hypot(player.x - e.x, player.y - e.y);
+                    let dClient = Math.hypot(peerPlayer.x - e.x, peerPlayer.y - e.y);
+                    
+                    if (dHost < 30) {
+                        if (player.superModeTimer > 0) { sharedScore += 50; } else { player.health -= 15; }
+                        spawnExplosion(e.x, e.y, '#f00'); enemies.splice(i, 1);
+                    } else if (dClient < 30) {
+                        if (peerPlayer.isSuperMode) { sharedScore += 50; } else { peerPlayer.health -= 15; }
+                        spawnExplosion(e.x, e.y, '#f00'); enemies.splice(i, 1);
+                    }
+                }
+
+                // Powerup Collision Check
+                for(let i = powerups.length -1; i>=0; i--) {
+                    if (Math.hypot(player.x - powerups[i].x, player.y - powerups[i].y) < 50) {
+                        triggerPowerup(player); powerups.splice(i, 1);
+                    } else if (Math.hypot(peerPlayer.x - powerups[i].x, peerPlayer.y - powerups[i].y) < 50) {
+                        // In real P2P, host should tell client they got it, but here client checks locally too
+                        powerups.splice(i, 1);
+                    }
+                }
+            } else {
+                // Client checks its own powerup pickup to stay responsive
+                for(let i = powerups.length -1; i>=0; i--) {
+                    if (Math.hypot(player.x - powerups[i].x, player.y - powerups[i].y) < 50) {
+                        triggerPowerup(player); powerups.splice(i, 1); // Local predictive splice
+                    }
+                }
             }
 
-            // Update Particles
-            for (let i = particles.length - 1; i >= 0; i--) {
-                particles[i].x += particles[i].vx;
-                particles[i].y += particles[i].vy;
-                particles[i].life -= particles[i].decay;
-                if (particles[i].life <= 0) particles.splice(i, 1);
+            // Death & Respawn
+            if (player.health <= 0) {
+                player.health = player.maxHealth;
+                player.x = 0; player.y = 0; player.vx = 0; player.vy = 0;
+                sharedScore = Math.max(0, sharedScore - 500); // Penalty
             }
+
+            updateUI();
 
             // Network Sync
             if (conn && conn.open) {
                 let packet = {
-                    type: 'state',
-                    px: player.x, py: player.y, pa: player.angle, pc: player.color,
-                    pt: player.isThrusting, fired: player.justFired
+                    type: 'state', px: player.x, py: player.y, pa: player.angle, pc: player.color,
+                    pt: player.isThrusting, psup: player.superModeTimer > 0, fired: player.justFired
                 };
-                if (isHost) {
-                    packet.enemies = enemies;
-                    packet.score = sharedScore;
-                }
+                if (isHost) { packet.enemies = enemies; packet.powerups = powerups; packet.score = sharedScore; packet.p2h = peerPlayer.health; }
                 conn.send(packet);
                 player.justFired = false;
             }
+        }
 
-            scoreDisplay.innerText = sharedScore;
+        function triggerPowerup(pTarget) {
+            pTarget.maxHealth = 500;
+            pTarget.health = 500;
+            pTarget.superModeTimer = 600; // 10 seconds at 60fps
+            if (pTarget === player) {
+                document.getElementById('btn-super').style.display = 'flex';
+                document.getElementById('super-text').style.display = 'block';
+            }
         }
 
         // --- RENDERING ---
         function draw() {
+            // Impact Frames Check (Screen shake and color inversion)
+            let isImpact = superBlasts.length > 0;
+            let currentBlast = isImpact ? superBlasts[0] : null;
+
+            if (isImpact && currentBlast.frame % 4 < 2) {
+                ctx.filter = 'invert(1)';
+            } else {
+                ctx.filter = 'none';
+            }
+
             ctx.fillStyle = '#050510';
             ctx.fillRect(0, 0, width, height);
 
             ctx.save();
-            // Camera follows local player
-            ctx.translate(width / 2 - player.x, height / 2 - player.y);
+            let camX = width / 2 - player.x; let camY = height / 2 - player.y;
+            // Screen Shake
+            if (isImpact) { camX += (Math.random()-0.5)*20; camY += (Math.random()-0.5)*20; }
+            ctx.translate(camX, camY);
 
-            // Draw Neon Grid
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.1)';
-            ctx.lineWidth = 2;
-            const gridSize = 150;
-            const startX = Math.floor((player.x - width/2) / gridSize) * gridSize;
-            const startY = Math.floor((player.y - height/2) / gridSize) * gridSize;
-            
+            // Draw Grid
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.1)'; ctx.lineWidth = 2;
+            const grid = 150; const sX = Math.floor((player.x - width/2)/grid)*grid; const sY = Math.floor((player.y - height/2)/grid)*grid;
             ctx.beginPath();
-            for (let x = startX; x < startX + width + gridSize; x += gridSize) {
-                ctx.moveTo(x, player.y - height); ctx.lineTo(x, player.y + height);
-            }
-            for (let y = startY; y < startY + height + gridSize; y += gridSize) {
-                ctx.moveTo(player.x - width, y); ctx.lineTo(player.x + width, y);
-            }
+            for (let x=sX; x<sX+width+grid; x+=grid) { ctx.moveTo(x, player.y-height); ctx.lineTo(x, player.y+height); }
+            for (let y=sY; y<sY+height+grid; y+=grid) { ctx.moveTo(player.x-width, y); ctx.lineTo(player.x+width, y); }
             ctx.stroke();
 
-            // Draw Particles
-            particles.forEach(p => {
-                ctx.fillStyle = p.color;
-                ctx.globalAlpha = Math.max(0, p.life);
-                ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill();
+            // Draw Powerups
+            powerups.forEach(p => {
+                ctx.shadowBlur = 20; ctx.shadowColor = '#ffaa00'; ctx.fillStyle = '#ffaa00';
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.8 + Math.sin(Date.now()/200)*0.2), 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#fff'; ctx.font = '20px Arial'; ctx.textAlign = 'center'; ctx.fillText('V', p.x, p.y+7);
             });
+
+            // Draw Particles & Lasers
+            particles.forEach(p => { ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life); ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); });
             ctx.globalAlpha = 1.0;
+            lasers.forEach(l => { ctx.shadowBlur = 10; ctx.shadowColor = l.color; ctx.fillStyle = l.color; ctx.beginPath(); ctx.arc(l.x, l.y, 4, 0, Math.PI*2); ctx.fill(); });
 
-            // Draw Enemies (Rogue Drones)
+            // Draw Enemies
             enemies.forEach(e => {
-                ctx.save();
-                ctx.translate(e.x, e.y);
-                ctx.shadowBlur = 15; ctx.shadowColor = '#ff0000';
-                ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 3;
-                ctx.beginPath();
-                ctx.moveTo(20, 0); ctx.lineTo(-10, 15); ctx.lineTo(-10, -15); ctx.closePath();
-                ctx.stroke();
-                ctx.restore();
+                ctx.save(); ctx.translate(e.x, e.y); ctx.shadowBlur = 15; ctx.shadowColor = '#f00';
+                ctx.strokeStyle = '#f00'; ctx.lineWidth = 3; ctx.beginPath();
+                ctx.moveTo(20, 0); ctx.lineTo(-10, 15); ctx.lineTo(-10, -15); ctx.closePath(); ctx.stroke(); ctx.restore();
             });
 
-            // Draw Lasers
-            lasers.forEach(l => {
-                ctx.shadowBlur = 10; ctx.shadowColor = l.color;
-                ctx.fillStyle = l.color;
-                ctx.beginPath(); ctx.arc(l.x, l.y, 4, 0, Math.PI * 2); ctx.fill();
+            // Draw Super Blasts
+            superBlasts.forEach(b => {
+                ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
+                ctx.fillStyle = `rgba(255, 170, 0, ${b.frame/60})`; ctx.fill();
+                ctx.lineWidth = 10 * (b.frame/60); ctx.strokeStyle = '#fff'; ctx.stroke();
             });
 
             // Draw Players
-            if (peerPlayer.x !== -9999) drawShip(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, peerPlayer.isThrusting);
-            drawShip(player.x, player.y, player.angle, player.color, player.isThrusting);
+            if (peerPlayer.x !== -9999) drawShip(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, peerPlayer.isThrusting, peerPlayer.isSuperMode);
+            drawShip(player.x, player.y, player.angle, player.color, player.isThrusting, player.superModeTimer > 0);
 
             ctx.restore();
         }
 
-        function drawShip(x, y, angle, color, isThrusting) {
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate(angle);
+        function drawShip(x, y, angle, color, isThrusting, isSuper) {
+            ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+            let glow = isSuper ? '#ffaa00' : color;
+            ctx.shadowBlur = isSuper ? 30 : 20; ctx.shadowColor = glow; ctx.strokeStyle = glow; ctx.lineWidth = isSuper ? 5 : 3; ctx.fillStyle = '#111';
             
-            ctx.shadowBlur = 20;
-            ctx.shadowColor = color;
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 3;
-            ctx.fillStyle = '#111';
+            ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(-15, 15); ctx.lineTo(-10, 0); ctx.lineTo(-15, -15); ctx.closePath();
+            ctx.fill(); ctx.stroke();
 
-            // Ship Hull (Sleek triangle design)
-            ctx.beginPath();
-            ctx.moveTo(20, 0); // Nose
-            ctx.lineTo(-15, 15); // Right wing
-            ctx.lineTo(-10, 0); // Engine indent
-            ctx.lineTo(-15, -15); // Left wing
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-
-            // Thruster Glow
             if (isThrusting) {
-                ctx.fillStyle = '#fff';
-                ctx.shadowColor = '#ffaa00';
-                ctx.beginPath();
-                ctx.moveTo(-12, -5); ctx.lineTo(-25, 0); ctx.lineTo(-12, 5);
-                ctx.fill();
+                ctx.fillStyle = '#fff'; ctx.shadowColor = glow;
+                ctx.beginPath(); ctx.moveTo(-12, -5); ctx.lineTo(isSuper ? -35 : -25, 0); ctx.lineTo(-12, 5); ctx.fill();
             }
             ctx.restore();
         }
 
-        function loop() {
-            if (!gameRunning) return;
-            update();
-            draw();
-            requestAnimationFrame(loop);
-        }
-
-        function startGame() {
-            gameRunning = true;
-            // Set initial spawn positions so players aren't perfectly stacked
-            player.x = isHost ? -100 : 100;
-            requestAnimationFrame(loop);
-        }
+        function loop() { if (!gameRunning) return; update(); draw(); requestAnimationFrame(loop); }
+        function startGame() { gameRunning = true; player.x = isHost ? -100 : 100; requestAnimationFrame(loop); }
     </script>
 </body>
 </html>
