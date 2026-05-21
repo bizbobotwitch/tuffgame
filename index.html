@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>P2P Laser Racers</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background-color: #222; color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden; touch-action: none;
+        }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        /* UI Menus */
+        #menu {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8); padding: 20px;
+            border: 2px solid #0f0; border-radius: 10px;
+            text-align: center; width: 300px; z-index: 10;
+        }
+        input, button {
+            width: 90%; padding: 10px; margin: 10px 0;
+            background: #111; color: #0f0;
+            border: 1px solid #0f0; border-radius: 5px;
+            font-family: inherit; font-size: 16px;
+        }
+        button:active { background: #0f0; color: #000; }
+        #my-id-display { font-weight: bold; color: #0ff; margin-bottom: 15px; word-break: break-all; }
+
+        /* Mobile Controls */
+        #controls {
+            position: absolute; bottom: 20px; left: 0; width: 100%;
+            display: none; justify-content: space-between;
+            padding: 0 20px; box-sizing: border-box; pointer-events: none;
+        }
+        .control-group { display: flex; gap: 10px; pointer-events: auto; }
+        .btn {
+            width: 60px; height: 60px; border-radius: 30px;
+            background: rgba(0, 255, 0, 0.3); border: 2px solid #0f0;
+            color: #fff; font-weight: bold; display: flex;
+            align-items: center; justify-content: center; user-select: none;
+        }
+        .btn:active { background: rgba(0, 255, 0, 0.7); }
+        .btn-action { background: rgba(255, 0, 0, 0.3); border-color: #f00; }
+        .btn-action:active { background: rgba(255, 0, 0, 0.7); }
+    </style>
+</head>
+<body>
+
+    <div id="menu">
+        <h2>LASER RACERS</h2>
+        <p>Your ID:</p>
+        <div id="my-id-display">Connecting to network...</div>
+        <p>Give this ID to a friend, or enter theirs below to join!</p>
+        <input type="text" id="friend-id" placeholder="Friend's ID">
+        <button id="join-btn">Join Game</button>
+        <p id="status"></p>
+    </div>
+
+    <div id="controls">
+        <div class="control-group">
+            <div class="btn" id="btn-left">◀</div>
+            <div class="btn" id="btn-right">▶</div>
+        </div>
+        <div class="control-group">
+            <div class="btn btn-action" id="btn-fire">FIRE</div>
+            <div class="btn btn-action" style="border-color: #0ff;" id="btn-boost">BOOST</div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // --- GAME ENGINE SETUP ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let width = canvas.width = window.innerWidth;
+        let height = canvas.height = window.innerHeight;
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        });
+
+        // --- P2P NETWORK SETUP (PeerJS) ---
+        const peer = new Peer(); // Generates a random ID automatically
+        let conn = null;
+        let isHost = false;
+
+        const myIdDisplay = document.getElementById('my-id-display');
+        const friendIdInput = document.getElementById('friend-id');
+        const joinBtn = document.getElementById('join-btn');
+        const statusText = document.getElementById('status');
+        const menu = document.getElementById('menu');
+        const controls = document.getElementById('controls');
+
+        peer.on('open', id => {
+            myIdDisplay.innerText = id;
+        });
+
+        // I am the host (someone connected to me)
+        peer.on('connection', connection => {
+            conn = connection;
+            isHost = true;
+            setupConnection();
+        });
+
+        // I am joining (I clicked the join button)
+        joinBtn.addEventListener('click', () => {
+            const friendId = friendIdInput.value.trim();
+            if (!friendId) return;
+            statusText.innerText = "Connecting...";
+            conn = peer.connect(friendId);
+            setupConnection();
+        });
+
+        function setupConnection() {
+            conn.on('open', () => {
+                menu.style.display = 'none';
+                controls.style.display = 'flex';
+                // If host, generate obstacles and send them
+                if (isHost) {
+                    generateObstacles();
+                    conn.send({ type: 'init', obstacles: obstacles });
+                }
+                startGame();
+            });
+
+            conn.on('data', data => {
+                if (data.type === 'init') {
+                    obstacles = data.obstacles; // Sync obstacles from host
+                } else if (data.type === 'state') {
+                    opponent.x = data.x;
+                    opponent.y = data.y;
+                    opponent.angle = data.angle;
+                    opponent.color = data.color;
+                    
+                    // Trigger opponent lasers
+                    if (data.fired) {
+                        lasers.push({
+                            x: opponent.x, y: opponent.y,
+                            vx: Math.cos(opponent.angle) * 15,
+                            vy: Math.sin(opponent.angle) * 15,
+                            owner: 'opponent'
+                        });
+                    }
+                }
+            });
+        }
+
+        // --- GAME LOGIC ---
+        let gameRunning = false;
+        
+        // Input state
+        const keys = { left: false, right: false, boost: false, fire: false };
+
+        // Bind touch/mouse controls
+        const bindBtn = (id, key) => {
+            const el = document.getElementById(id);
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; });
+            el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; });
+            el.addEventListener('mousedown', () => keys[key] = true);
+            el.addEventListener('mouseup', () => keys[key] = false);
+        };
+        bindBtn('btn-left', 'left');
+        bindBtn('btn-right', 'right');
+        bindBtn('btn-boost', 'boost');
+        
+        // Fire is a single trigger, not continuous
+        document.getElementById('btn-fire').addEventListener('touchstart', (e) => { e.preventDefault(); fireLaser(); });
+        document.getElementById('btn-fire').addEventListener('mousedown', () => fireLaser());
+
+        // Player Objects
+        const player = { x: width/2, y: height/2, angle: -Math.PI/2, speed: 0, color: '#0f0', justFired: false };
+        const opponent = { x: -1000, y: -1000, angle: 0, color: '#f00' }; // Hides offscreen until synced
+        
+        let obstacles = [];
+        let lasers = [];
+
+        function generateObstacles() {
+            obstacles = [];
+            for (let i = 0; i < 15; i++) {
+                obstacles.push({
+                    x: Math.random() * 2000 - 1000,
+                    y: Math.random() * 2000 - 1000,
+                    size: 40 + Math.random() * 60
+                });
+            }
+        }
+
+        function fireLaser() {
+            lasers.push({
+                x: player.x, y: player.y,
+                vx: Math.cos(player.angle) * 15,
+                vy: Math.sin(player.angle) * 15,
+                owner: 'player'
+            });
+            player.justFired = true;
+        }
+
+        function update() {
+            // Turning
+            if (keys.left) player.angle -= 0.08;
+            if (keys.right) player.angle += 0.08;
+
+            // Speed & Boosting (Auto-drive mechanic for easier mobile play)
+            let targetSpeed = keys.boost ? 10 : 4;
+            player.speed += (targetSpeed - player.speed) * 0.1;
+
+            // Move player
+            player.x += Math.cos(player.angle) * player.speed;
+            player.y += Math.sin(player.angle) * player.speed;
+
+            // Update lasers
+            for (let i = lasers.length - 1; i >= 0; i--) {
+                lasers[i].x += lasers[i].vx;
+                lasers[i].y += lasers[i].vy;
+                // Remove old lasers based on distance from player to save memory
+                if (Math.hypot(lasers[i].x - player.x, lasers[i].y - player.y) > 1500) {
+                    lasers.splice(i, 1);
+                }
+            }
+
+            // Send State to Peer
+            if (conn && conn.open) {
+                conn.send({
+                    type: 'state',
+                    x: player.x, y: player.y, angle: player.angle, color: player.color,
+                    fired: player.justFired
+                });
+                player.justFired = false;
+            }
+        }
+
+        function draw() {
+            // Camera follows player: Shift canvas context
+            ctx.save();
+            ctx.translate(width / 2 - player.x, height / 2 - player.y);
+
+            // Draw Background Grid (gives illusion of movement)
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            const gridSize = 100;
+            const startX = Math.floor((player.x - width/2) / gridSize) * gridSize;
+            const startY = Math.floor((player.y - height/2) / gridSize) * gridSize;
+            
+            for (let x = startX; x < startX + width + gridSize; x += gridSize) {
+                ctx.beginPath(); ctx.moveTo(x, player.y - height/2); ctx.lineTo(x, player.y + height/2); ctx.stroke();
+            }
+            for (let y = startY; y < startY + height + gridSize; y += gridSize) {
+                ctx.beginPath(); ctx.moveTo(player.x - width/2, y); ctx.lineTo(player.x + width/2, y); ctx.stroke();
+            }
+
+            // Draw Obstacles
+            ctx.fillStyle = '#555';
+            ctx.strokeStyle = '#fff';
+            obstacles.forEach(obs => {
+                ctx.fillRect(obs.x, obs.y, obs.size, obs.size);
+                ctx.strokeRect(obs.x, obs.y, obs.size, obs.size);
+            });
+
+            // Draw Lasers
+            lasers.forEach(laser => {
+                ctx.fillStyle = laser.owner === 'player' ? '#0ff' : '#ff0';
+                ctx.beginPath();
+                ctx.arc(laser.x, laser.y, 4, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Draw Opponent
+            drawCar(opponent.x, opponent.y, opponent.angle, opponent.color);
+
+            // Draw Player
+            drawCar(player.x, player.y, player.angle, player.color);
+
+            ctx.restore();
+        }
+
+        function drawCar(x, y, angle, color) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            // Car Body
+            ctx.fillStyle = color;
+            ctx.fillRect(-15, -10, 30, 20);
+            // Windshield/Front indicator
+            ctx.fillStyle = '#000';
+            ctx.fillRect(5, -8, 10, 16);
+            ctx.restore();
+        }
+
+        function loop() {
+            if (!gameRunning) return;
+            update();
+            // Clear screen
+            ctx.fillStyle = '#222';
+            ctx.fillRect(0, 0, width, height);
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        function startGame() {
+            gameRunning = true;
+            requestAnimationFrame(loop);
+        }
+    </script>
+</body>
+</html>
