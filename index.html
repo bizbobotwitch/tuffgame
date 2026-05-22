@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Vanguard: Blood & Guts</title>
+    <title>Neon Vanguard: Full 3D</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body, html {
             margin: 0; padding: 0; width: 100%; height: 100%;
@@ -12,8 +13,9 @@
             font-family: 'Courier New', Courier, monospace;
             overflow: hidden; touch-action: none;
         }
-        canvas { display: block; width: 100%; height: 100%; }
+        #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
         
+        /* UI Elements (Z-Index ensures they float above the 3D canvas) */
         #menu {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(10, 10, 20, 0.9); padding: 30px;
@@ -33,42 +35,33 @@
             position: absolute; top: 20px; left: 0; width: 100%;
             text-align: center; font-size: 20px; font-weight: bold;
             color: #fff; text-shadow: 0 0 10px #fff; pointer-events: none;
-            display: none; z-index: 5;
+            display: none; z-index: 10;
         }
-        .health-bar-container {
-            width: 200px; height: 15px; border: 2px solid #fff; 
-            margin: 10px auto; border-radius: 10px; overflow: hidden;
-        }
+        .health-bar-container { width: 200px; height: 15px; border: 2px solid #fff; margin: 10px auto; border-radius: 10px; overflow: hidden; }
         #health-bar { width: 100%; height: 100%; background: #0f0; transition: width 0.2s, background 0.2s; }
-        .hud-text { font-size: 16px; margin-top: 5px; text-shadow: 0 0 5px currentColor; }
 
         #controls {
             position: absolute; bottom: 30px; left: 0; width: 100%;
             display: none; justify-content: space-between; padding: 0 20px; box-sizing: border-box;
-            pointer-events: none; z-index: 5;
+            pointer-events: none; z-index: 10;
         }
         .control-group { display: flex; gap: 15px; pointer-events: auto; }
         .control-group-col { display: flex; flex-direction: column; gap: 10px; pointer-events: auto; }
         .btn {
             width: 65px; height: 65px; border-radius: 50%;
             background: rgba(0, 255, 255, 0.1); border: 2px solid #0ff;
-            color: #0ff; font-weight: bold; display: flex;
-            align-items: center; justify-content: center; user-select: none;
-            transition: border-color 0.2s, color 0.2s;
+            color: #0ff; font-weight: bold; display: flex; align-items: center; justify-content: center; user-select: none;
         }
         .btn:active { background: rgba(0, 255, 255, 0.5); }
         .btn-action { border-color: #f0f; color: #f0f; }
-        .btn-super { border-color: #ffaa00; color: #ffaa00; box-shadow: 0 0 15px currentColor; display: none; }
-        .btn-super:active { background: rgba(255, 170, 0, 0.5); }
         .btn-brake { border-color: #ff3333; color: #ff3333; }
         .btn-dash { border-color: #ffaa00; color: #ffaa00; background: rgba(255, 170, 0, 0.1); }
-        .btn-dash:active { background: rgba(255, 170, 0, 0.5); }
     </style>
 </head>
 <body>
 
     <div id="menu">
-        <h2>ASYMMETRIC CO-OP</h2>
+        <h2>3D CO-OP VANGUARD</h2>
         <p>Your Link ID:</p>
         <div id="my-id-display">Generating Link...</div>
         <input type="text" id="friend-id" placeholder="Wingman's ID">
@@ -79,7 +72,6 @@
     <div id="hud">
         SCORE: <span id="scoreDisplay">0</span>
         <div class="health-bar-container"><div id="health-bar"></div></div>
-        <div id="super-text" class="hud-text" style="color: #888; display: none;">LINKING POWERS...</div>
     </div>
 
     <div id="controls">
@@ -89,7 +81,6 @@
         </div>
         <div class="control-group">
             <div class="control-group-col">
-                <div class="btn btn-super" id="btn-super">SUPER</div>
                 <div class="btn btn-action" id="btn-fire">FIRE</div>
                 <div class="btn btn-brake" id="btn-brake">STOP</div>
             </div>
@@ -97,15 +88,115 @@
         </div>
     </div>
 
-    <canvas id="gameCanvas"></canvas>
+    <div id="game-container"></div>
 
     <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        let width = canvas.width = window.innerWidth;
-        let height = canvas.height = window.innerHeight;
+        // --- THREE.JS 3D ENGINE SETUP ---
+        const container = document.getElementById('game-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050510, 0.001);
 
-        window.addEventListener('resize', () => { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; });
+        // Isometric-style trailing camera
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 3000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 2); 
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(0x00ffff, 1.5, 1000);
+        scene.add(pointLight);
+
+        // Neon Grid Floor
+        const gridHelper = new THREE.GridHelper(4000, 40, 0x00ffff, 0x003333);
+        gridHelper.position.y = -20;
+        scene.add(gridHelper);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- 3D MESH GENERATORS ---
+        function createViltrumiteMesh() {
+            const group = new THREE.Group();
+            
+            // Torso (Yellow)
+            const torsoGeo = new THREE.BoxGeometry(16, 20, 10);
+            const torsoMat = new THREE.MeshLambertMaterial({ color: 0xffcc00 });
+            const torso = new THREE.Mesh(torsoGeo, torsoMat);
+            torso.position.y = 10;
+            group.add(torso);
+
+            // Legs (Blue)
+            const legGeo = new THREE.BoxGeometry(14, 15, 8);
+            const legMat = new THREE.MeshLambertMaterial({ color: 0x0044ff });
+            const legs = new THREE.Mesh(legGeo, legMat);
+            legs.position.y = -8;
+            group.add(legs);
+
+            // Head
+            const headGeo = new THREE.BoxGeometry(12, 12, 12);
+            const headMat = new THREE.MeshLambertMaterial({ color: 0xffcc99 });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 26;
+            group.add(head);
+
+            // Flowing Hair (Attached to head)
+            const hairGeo = new THREE.ConeGeometry(5, 15, 4);
+            const hairMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+            const hair1 = new THREE.Mesh(hairGeo, hairMat);
+            hair1.position.set(-4, 6, -5);
+            hair1.rotation.x = -Math.PI / 4;
+            const hair2 = new THREE.Mesh(hairGeo, hairMat);
+            hair2.position.set(4, 6, -5);
+            hair2.rotation.x = -Math.PI / 4;
+            head.add(hair1);
+            head.add(hair2);
+
+            // Flowing Cape
+            const capeGeo = new THREE.PlaneGeometry(20, 40);
+            const capeMat = new THREE.MeshLambertMaterial({ color: 0xff0000, side: THREE.DoubleSide });
+            const cape = new THREE.Mesh(capeGeo, capeMat);
+            cape.position.set(0, 10, -8);
+            cape.rotation.x = -Math.PI / 6;
+            group.add(cape);
+
+            // Fists
+            const fistGeo = new THREE.SphereGeometry(4, 8, 8);
+            const fistMat = new THREE.MeshLambertMaterial({ color: 0xffcc00 });
+            const fistL = new THREE.Mesh(fistGeo, fistMat);
+            fistL.position.set(-12, 10, 10);
+            const fistR = new THREE.Mesh(fistGeo, fistMat);
+            fistR.position.set(12, 10, 10);
+            group.add(fistL);
+            group.add(fistR);
+
+            group.userData = { cape: cape, head: head, hair1: hair1, hair2: hair2 };
+            return group;
+        }
+
+        function createLaserShipMesh() {
+            const group = new THREE.Group();
+            
+            const bodyGeo = new THREE.CylinderGeometry(0, 15, 40, 4);
+            const bodyMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.rotation.x = Math.PI / 2; // Point forward
+            body.rotation.y = Math.PI / 4; // Diamond shape
+            
+            // Neon outlines
+            const edges = new THREE.EdgesGeometry(bodyGeo);
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x00ffff }));
+            line.rotation.x = Math.PI / 2;
+            line.rotation.y = Math.PI / 4;
+
+            group.add(body);
+            group.add(line);
+            return group;
+        }
 
         // --- P2P NETWORK SETUP ---
         const peer = new Peer();
@@ -127,39 +218,28 @@
                 document.getElementById('menu').style.display = 'none';
                 document.getElementById('controls').style.display = 'flex';
                 document.getElementById('hud').style.display = 'block';
-                player.color = isHost ? '#0ff' : '#f0f';
                 startGame();
             });
 
             conn.on('data', data => {
                 if (data.type === 'state') {
-                    peerPlayer.x = data.px; peerPlayer.y = data.py;
-                    peerPlayer.angle = data.pa; peerPlayer.color = data.pc;
-                    peerPlayer.isThrusting = data.pt; 
-                    peerPlayer.chargeTimer = data.pct; 
-                    peerPlayer.isHyperLaser = data.phl;
-                    peerPlayer.isDashing = data.pdash;
+                    peerPlayer.x = data.px; peerPlayer.z = data.pz;
+                    peerPlayer.angle = data.pa; 
                     peerPlayer.role = data.prole;
 
+                    // Initialize meshes if roles are assigned
                     if (!isHost && player.role === 'none') {
                         player.role = data.prole === 'viltrumite' ? 'laser' : 'viltrumite';
-                        applyRoleStats(player);
+                        initPlayerMeshes();
                     }
 
-                    if (data.fired) spawnLaser(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, false, data.phl, peerPlayer.role === 'viltrumite');
+                    if (data.fired) spawnLaser(peerPlayer.x, peerPlayer.z, peerPlayer.angle, peerPlayer.role === 'viltrumite');
                     
                     if (!isHost) {
-                        enemies = data.enemies || [];
+                        syncEnemies(data.enemies || []);
                         sharedScore = data.score !== undefined ? data.score : sharedScore;
                         player.health = data.p2h;
-                        
-                        // Sync splatters created by host
-                        if (data.newSplatters) {
-                            data.newSplatters.forEach(s => splatters.push(s));
-                        }
                     }
-                } else if (data.type === 'super_trigger') {
-                    triggerSuperAnimation(data.x, data.y);
                 }
             });
         }
@@ -176,9 +256,6 @@
         bindBtn('btn-left', 'left'); bindBtn('btn-right', 'right');
         bindBtn('btn-gas', 'gas'); bindBtn('btn-brake', 'brake'); 
         
-        document.getElementById('btn-super').addEventListener('touchstart', (e) => { e.preventDefault(); trySuper(); });
-        document.getElementById('btn-super').addEventListener('mousedown', () => trySuper());
-
         document.getElementById('btn-fire').addEventListener('touchstart', (e) => { e.preventDefault(); tryFire(); });
         document.getElementById('btn-fire').addEventListener('mousedown', () => tryFire());
 
@@ -188,451 +265,273 @@
             if(e.key === 'ArrowUp' || e.key === 'w') keys.gas = true;
             if(e.key === 'ArrowDown' || e.key === 's') keys.brake = true;
             if(e.key === ' ') tryFire();
-            if(e.key === 'Shift') trySuper();
         });
         window.addEventListener('keyup', e => {
             if(['ArrowLeft','a','ArrowRight','d','ArrowUp','w','ArrowDown','s'].includes(e.key)) keys[e.key==='ArrowUp'||e.key==='w'?'gas':e.key==='ArrowDown'||e.key==='s'?'brake':e.key==='ArrowLeft'||e.key==='a'?'left':'right'] = false;
         });
 
-        // --- GAME ENTITIES ---
-        let gameRunning = false; let sharedScore = 0; let tick = 0;
+        // --- GAME ENTITIES (3D coordinates use X and Z) ---
+        let gameRunning = false; let sharedScore = 0; let clock = new THREE.Clock();
         
         const player = { 
-            x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, color: '#0ff', 
+            x: 0, z: 0, vx: 0, vz: 0, angle: 0, mesh: null, 
             isThrusting: false, justFired: false, cooldown: 0,
-            health: 100, maxHealth: 100, role: 'none', superCooldown: 0, chargeTimer: 0, hyperLaserTimer: 0,
-            dashTimer: 0, dashCooldown: 0
+            health: 100, maxHealth: 100, role: 'none'
         };
-        const peerPlayer = { x: -9999, y: -9999, angle: 0, color: '#f0f', health: 100, role: 'none', chargeTimer: 0, isHyperLaser: false, isDashing: false };
+        const peerPlayer = { x: -9999, z: -9999, angle: 0, mesh: null, role: 'none' };
         
-        let lasers = []; let enemies = []; let particles = []; let superBlasts = []; let splatters = [];
-        let newSplattersToSync = []; // Host uses this to send new splatters to client
-        
-        function applyRoleStats(p) {
-            if (p.role === 'viltrumite') {
-                p.maxHealth = 800; p.health = 800;
-            } else if (p.role === 'laser') {
-                p.maxHealth = 200; p.health = 200; 
-            }
-            if (p === player) {
-                document.getElementById('btn-super').style.display = 'flex';
-                document.getElementById('super-text').style.display = 'block';
-                
-                if(p.role === 'viltrumite') {
-                    document.getElementById('btn-fire').innerText = "CLAP";
-                    let brakeBtn = document.getElementById('btn-brake');
-                    brakeBtn.innerText = "DASH";
-                    brakeBtn.className = "btn btn-dash"; 
-                }
-            }
-        }
+        let lasers = []; let enemies = [];
 
-        // --- LOGIC ---
-        function tryFire() {
-            if (player.cooldown <= 0 && player.chargeTimer <= 0) {
-                let isViltrumite = player.role === 'viltrumite';
-                spawnLaser(player.x, player.y, player.angle, player.color, true, player.hyperLaserTimer > 0, isViltrumite);
-                player.justFired = true;
-                player.cooldown = player.hyperLaserTimer > 0 ? 30 : (isViltrumite ? 20 : 15);
-            }
-        }
+        function initPlayerMeshes() {
+            // Apply Stats
+            player.maxHealth = player.role === 'viltrumite' ? 800 : 200;
+            player.health = player.maxHealth;
 
-        function trySuper() {
-            if (player.superCooldown <= 0 && player.chargeTimer <= 0 && player.role !== 'none') {
-                if (player.role === 'viltrumite') { player.chargeTimer = 120; } 
-                else if (player.role === 'laser') { player.hyperLaserTimer = 300; }
-                player.superCooldown = 900; 
-            }
-        }
-
-        function triggerSuperAnimation(x, y) {
-            superBlasts.push({ x: x, y: y, radius: 10, maxRadius: 1800, frame: 60 });
-        }
-
-        function spawnLaser(x, y, angle, color, isLocal, isHyper, isSonicClap) {
-            if (isSonicClap) {
-                lasers.push({ x: x + Math.cos(angle)*30, y: y + Math.sin(angle)*30, vx: Math.cos(angle)*25, vy: Math.sin(angle)*25, color: '#ffffff', age: 0, isHyper: false, isClap: true, size: 60, angle: angle });
-            } else if (isHyper) {
-                lasers.push({ x: x + Math.cos(angle)*40, y: y + Math.sin(angle)*40, vx: Math.cos(angle)*30, vy: Math.sin(angle)*30, color: '#00ffff', age: 0, isHyper: true, isClap: false, size: 40 });
+            if (player.role === 'viltrumite') {
+                player.mesh = createViltrumiteMesh();
+                peerPlayer.mesh = createLaserShipMesh();
+                document.getElementById('btn-fire').innerText = "CLAP";
+                document.getElementById('btn-brake').innerText = "DASH";
+                document.getElementById('btn-brake').className = "btn btn-dash"; 
             } else {
-                lasers.push({ x: x + Math.cos(angle)*20, y: y + Math.sin(angle)*20, vx: Math.cos(angle)*20, vy: Math.sin(angle)*20, color: color, age: 0, isHyper: false, isClap: false, size: 4 });
+                player.mesh = createLaserShipMesh();
+                peerPlayer.mesh = createViltrumiteMesh();
+            }
+            scene.add(player.mesh);
+            scene.add(peerPlayer.mesh);
+        }
+
+        function tryFire() {
+            if (player.cooldown <= 0) {
+                spawnLaser(player.x, player.z, player.angle, player.role === 'viltrumite');
+                player.justFired = true;
+                player.cooldown = player.role === 'viltrumite' ? 20 : 15;
             }
         }
 
-        function spawnExplosion(x, y, color) {
-            for(let i=0; i<20; i++) {
-                particles.push({ x: x, y: y, vx: (Math.random()-0.5)*15, vy: (Math.random()-0.5)*15, life: 1.0, decay: 0.04, color: color });
+        function spawnLaser(x, z, angle, isViltrumite) {
+            let mesh;
+            if (isViltrumite) {
+                // Sonic Clap (Wide 3D crescent using a squashed torus)
+                const geo = new THREE.TorusGeometry(20, 2, 8, 24, Math.PI);
+                const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                mesh = new THREE.Mesh(geo, mat);
+                mesh.rotation.x = Math.PI / 2;
+                mesh.rotation.z = angle;
+            } else {
+                // Standard Neon Laser
+                const geo = new THREE.SphereGeometry(4, 8, 8);
+                const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+                mesh = new THREE.Mesh(geo, mat);
             }
+            
+            // Offset spawn point
+            mesh.position.set(x + Math.sin(angle)*30, 0, z + Math.cos(angle)*30);
+            scene.add(mesh);
+
+            lasers.push({
+                mesh: mesh,
+                x: mesh.position.x, z: mesh.position.z,
+                vx: Math.sin(angle) * (isViltrumite ? 25 : 30),
+                vz: Math.cos(angle) * (isViltrumite ? 25 : 30),
+                isClap: isViltrumite, age: 0
+            });
         }
 
-        function spawnBloodSplatter(x, y) {
-            let count = Math.floor(Math.random() * 5) + 5;
-            for(let i=0; i<count; i++) {
-                let splatter = {
-                    x: x + (Math.random()-0.5)*60,
-                    y: y + (Math.random()-0.5)*60,
-                    size: Math.random() * 12 + 4,
-                    life: 1.0
-                };
-                splatters.push(splatter);
-                if (isHost) newSplattersToSync.push(splatter);
+        // Create 3D Enemies
+        function createEnemyMesh(type) {
+            let mesh;
+            if (type === 'brute') {
+                mesh = new THREE.Mesh(new THREE.BoxGeometry(40, 40, 40), new THREE.MeshLambertMaterial({ color: 0xa020f0 }));
+            } else {
+                mesh = new THREE.Mesh(new THREE.TetrahedronGeometry(15), new THREE.MeshLambertMaterial({ color: 0xff0000 }));
             }
-            // Memory cleanup
-            if (splatters.length > 300) splatters.splice(0, splatters.length - 300);
+            scene.add(mesh);
+            return mesh;
         }
 
-        function updateUI() {
-            document.getElementById('scoreDisplay').innerText = sharedScore;
-            const hpBar = document.getElementById('health-bar');
-            hpBar.style.width = Math.max(0, (player.health / player.maxHealth) * 100) + "%";
-            hpBar.style.background = player.health > (player.maxHealth/2) ? '#0f0' : (player.health > (player.maxHealth/4) ? '#ffaa00' : '#f00');
-
-            if (player.role !== 'none') {
-                const superBtn = document.getElementById('btn-super');
-                const superText = document.getElementById('super-text');
-                
-                if (player.superCooldown > 0) {
-                    let secs = Math.ceil(player.superCooldown / 60);
-                    superText.innerText = `COOLDOWN: ${secs}s`;
-                    superText.style.color = '#555';
-                    superBtn.style.borderColor = '#555'; superBtn.style.color = '#555';
-                    superBtn.style.boxShadow = 'none';
-                } else {
-                    superText.innerText = player.role === 'viltrumite' ? 'IMPACT READY' : 'HYPER BEAM READY';
-                    let readyColor = player.role === 'viltrumite' ? '#ffaa00' : '#00ffff';
-                    superText.style.color = readyColor;
-                    superBtn.style.borderColor = readyColor; superBtn.style.color = readyColor;
-                    superBtn.style.boxShadow = `0 0 15px ${readyColor}`;
-                }
-
-                if (player.role === 'viltrumite') {
-                    let dashBtn = document.getElementById('btn-brake');
-                    if (player.dashCooldown > 0) {
-                        dashBtn.style.opacity = "0.3";
-                    } else {
-                        dashBtn.style.opacity = "1";
-                    }
-                }
+        function syncEnemies(serverEnemies) {
+            // Match local meshes to server data (simplified for this demo)
+            while (enemies.length < serverEnemies.length) {
+                let eData = serverEnemies[enemies.length];
+                enemies.push({ id: eData.id, type: eData.type, size: eData.size, mesh: createEnemyMesh(eData.type) });
+            }
+            while (enemies.length > serverEnemies.length) {
+                let e = enemies.pop();
+                scene.remove(e.mesh);
+            }
+            // Update positions
+            for(let i=0; i<serverEnemies.length; i++) {
+                enemies[i].mesh.position.set(serverEnemies[i].x, 0, serverEnemies[i].z);
             }
         }
 
         function update() {
-            tick++;
-            
-            // Update Splatters (fade over time)
-            for (let i = splatters.length - 1; i >= 0; i--) {
-                splatters[i].life -= 0.001;
-                if (splatters[i].life <= 0) splatters.splice(i, 1);
-            }
+            const time = clock.getElapsedTime();
 
-            if (player.role === 'viltrumite' && player.health < player.maxHealth && tick % 15 === 0) {
-                player.health += 2; 
-            }
+            let turnSpeed = player.role === 'viltrumite' ? 0.08 : 0.05; 
+            let accel = player.role === 'viltrumite' ? 1.5 : 0.8; 
 
-            if (player.role === 'viltrumite' && keys.brake && player.dashCooldown <= 0) {
-                player.dashTimer = 15; 
-                player.dashCooldown = 120; 
-            }
+            if (keys.left) player.angle += turnSpeed; // In 3D space, + angle turns left
+            if (keys.right) player.angle -= turnSpeed;
 
-            if (player.chargeTimer > 0) {
-                player.chargeTimer--;
-                player.vx *= 0.8; player.vy *= 0.8; 
-                if (player.chargeTimer === 1) {
-                    triggerSuperAnimation(player.x, player.y);
-                    if (conn && conn.open) conn.send({ type: 'super_trigger', x: player.x, y: player.y });
-                }
-            } else if (player.dashTimer > 0) {
-                player.dashTimer--;
-                player.vx = Math.cos(player.angle) * 35; 
-                player.vy = Math.sin(player.angle) * 35;
-                if (player.dashTimer % 3 === 0) spawnExplosion(player.x, player.y, '#ffaa00');
+            // Dashing Logic (Viltrumite)
+            if (player.role === 'viltrumite' && keys.brake) {
+                player.vx = Math.sin(player.angle) * 35; 
+                player.vz = Math.cos(player.angle) * 35;
             } else {
-                let turnSpeed = player.role === 'viltrumite' ? 0.14 : 0.08; 
-                let accel = player.role === 'viltrumite' ? 0.9 : 0.4; 
-
-                if (keys.left) player.angle -= turnSpeed;
-                if (keys.right) player.angle += turnSpeed;
-
                 player.isThrusting = keys.gas;
-                if (keys.gas) { player.vx += Math.cos(player.angle) * accel; player.vy += Math.sin(player.angle) * accel; }
+                if (keys.gas) { 
+                    player.vx += Math.sin(player.angle) * accel; 
+                    player.vz += Math.cos(player.angle) * accel; 
+                }
                 
                 if (player.role === 'laser' && keys.brake) { 
-                    player.vx *= 0.80; player.vy *= 0.80; 
+                    player.vx *= 0.80; player.vz *= 0.80; 
                 } else { 
-                    player.vx *= 0.96; player.vy *= 0.96; 
+                    player.vx *= 0.95; player.vz *= 0.95; 
                 }
             }
 
-            player.x += player.vx; player.y += player.vy;
+            player.x += player.vx; player.z += player.vz;
             if(player.cooldown > 0) player.cooldown--;
-            if(player.superCooldown > 0) player.superCooldown--;
-            if(player.hyperLaserTimer > 0) player.hyperLaserTimer--;
-            if(player.dashCooldown > 0) player.dashCooldown--;
 
-            if ((player.isThrusting || player.dashTimer > 0) && Math.random() > 0.2) {
-                let exhaustColor = player.role === 'viltrumite' ? '#ffaa00' : player.color;
-                particles.push({ x: player.x - Math.cos(player.angle)*20, y: player.y - Math.sin(player.angle)*20, vx: -player.vx*0.2, vy: -player.vy*0.2, life: 1.0, decay: 0.1, color: exhaustColor });
-            }
+            // Update Player Mesh & Procedural Animations
+            if (player.mesh) {
+                player.mesh.position.set(player.x, 0, player.z);
+                player.mesh.rotation.y = player.angle;
 
-            for(let i = superBlasts.length -1; i >= 0; i--) {
-                let b = superBlasts[i]; b.radius += (b.maxRadius - b.radius) * 0.15; b.frame--;
-                if (isHost) {
-                    for (let j = enemies.length - 1; j >= 0; j--) {
-                        if (Math.hypot(b.x - enemies[j].x, b.y - enemies[j].y) < b.radius) {
-                            spawnExplosion(enemies[j].x, enemies[j].y, enemies[j].type === 'brute' ? '#a020f0' : '#f00'); 
-                            spawnBloodSplatter(enemies[j].x, enemies[j].y);
-                            enemies.splice(j, 1); sharedScore += 50;
-                        }
-                    }
-                }
-                if (b.frame <= 0) superBlasts.splice(i, 1);
-            }
-
-            for (let i = lasers.length - 1; i >= 0; i--) {
-                let l = lasers[i]; l.x += l.vx; l.y += l.vy; l.age++;
-                if (l.age > (l.isHyper ? 60 : (l.isClap ? 40 : 100))) { lasers.splice(i, 1); continue; }
-                
-                if (isHost) {
-                    for (let j = enemies.length - 1; j >= 0; j--) {
-                        let hitDist = (l.isHyper || l.isClap) ? l.size + 15 : enemies[j].size;
-                        if (Math.hypot(l.x - enemies[j].x, l.y - enemies[j].y) < hitDist) {
-                            enemies[j].hp -= (l.isHyper ? 5 : (l.isClap ? 3 : 1));
-                            
-                            if (enemies[j].hp <= 0) {
-                                spawnExplosion(enemies[j].x, enemies[j].y, enemies[j].type === 'brute' ? '#a020f0' : '#f00');
-                                spawnBloodSplatter(enemies[j].x, enemies[j].y);
-                                sharedScore += (enemies[j].type === 'brute' ? 150 : 50);
-                                enemies.splice(j, 1); 
-                            } else {
-                                spawnExplosion(l.x, l.y, '#fff');
-                                // Small blood splatter on hit
-                                spawnBloodSplatter(enemies[j].x + (Math.random()-0.5)*20, enemies[j].y + (Math.random()-0.5)*20);
-                            }
-
-                            if (!l.isHyper && !l.isClap) { lasers.splice(i, 1); break; } 
-                        }
-                    }
-                }
-            }
-
-            for (let i = particles.length - 1; i >= 0; i--) {
-                particles[i].x += particles[i].vx; particles[i].y += particles[i].vy;
-                particles[i].life -= particles[i].decay; if (particles[i].life <= 0) particles.splice(i, 1);
-            }
-
-            let isFearFreeze = player.chargeTimer > 0 || peerPlayer.chargeTimer > 0;
-
-            if (isHost) {
-                if (Math.random() < 0.05 && enemies.length < 60 && !isFearFreeze) {
-                    let t = Math.random() > 0.5 ? player : peerPlayer;
-                    let rand = Math.random();
-                    let eType = 'drone'; let eSize = 20; let eHp = 1; let eSpeed = 4.5;
+                // FLUID ANIMATION: The Viltrumite's Cape & Hair physics
+                if (player.role === 'viltrumite') {
+                    const speed = Math.hypot(player.vx, player.vz);
+                    const userData = player.mesh.userData;
                     
-                    if (rand > 0.85) { eType = 'brute'; eSize = 45; eHp = 5; eSpeed = 1.5; } 
-                    else if (rand > 0.70) { eType = 'seeker'; eSize = 15; eHp = 1; eSpeed = 6.5; } 
+                    // Cape flaps faster the faster you move
+                    userData.cape.rotation.x = -Math.PI / 6 + Math.sin(time * 15) * (0.2 + speed * 0.02);
+                    
+                    // Hair flows back based on speed
+                    userData.hair1.rotation.x = -Math.PI / 4 - (speed * 0.05) + Math.sin(time * 10) * 0.1;
+                    userData.hair2.rotation.x = -Math.PI / 4 - (speed * 0.05) + Math.cos(time * 10) * 0.1;
 
-                    enemies.push({ x: t.x + Math.cos(Math.random()*Math.PI*2)*1200, y: t.y + Math.sin(Math.random()*Math.PI*2)*1200, size: eSize, hp: eHp, speed: eSpeed, type: eType, targetId: t === player ? 'host' : 'client' });
+                    // Body leans into the movement
+                    player.mesh.rotation.x = speed * 0.02; 
+                } else {
+                    // Ship hovering animation
+                    player.mesh.position.y = Math.sin(time * 5) * 5;
+                    player.mesh.rotation.z = -player.vx * 0.05; // Bank into turns
+                }
+            }
+
+            // Sync Peer Mesh
+            if (peerPlayer.mesh) {
+                peerPlayer.mesh.position.set(peerPlayer.x, 0, peerPlayer.z);
+                peerPlayer.mesh.rotation.y = peerPlayer.angle;
+                // Basic peer animation
+                if (peerPlayer.role === 'viltrumite') {
+                    peerPlayer.mesh.userData.cape.rotation.x = -Math.PI / 6 + Math.sin(time * 15) * 0.3;
+                } else {
+                    peerPlayer.mesh.position.y = Math.sin(time * 5) * 5;
+                }
+            }
+
+            // Move Lasers
+            for (let i = lasers.length - 1; i >= 0; i--) {
+                let l = lasers[i]; 
+                l.x += l.vx; l.z += l.vz; 
+                l.mesh.position.set(l.x, 0, l.z);
+                l.age++;
+                if (l.age > (l.isClap ? 40 : 100)) { 
+                    scene.remove(l.mesh);
+                    lasers.splice(i, 1); 
+                }
+            }
+
+            // Host Enemy Logic
+            if (isHost) {
+                if (Math.random() < 0.05 && enemies.length < 30) {
+                    let t = Math.random() > 0.5 ? player : peerPlayer;
+                    let type = Math.random() > 0.8 ? 'brute' : 'drone';
+                    let e = { 
+                        id: Math.random(), type: type, 
+                        size: type === 'brute' ? 30 : 15, 
+                        hp: type === 'brute' ? 5 : 1, speed: type === 'brute' ? 2 : 5,
+                        x: t.x + Math.sin(Math.random()*Math.PI*2)*1200, 
+                        z: t.z + Math.cos(Math.random()*Math.PI*2)*1200, 
+                        targetId: t === player ? 'host' : 'client' 
+                    };
+                    e.mesh = createEnemyMesh(e.type);
+                    enemies.push(e);
                 }
 
-                if (!isFearFreeze) {
-                    for(let i = enemies.length - 1; i >= 0; i--) {
-                        let e = enemies[i];
-                        let target = e.targetId === 'host' ? player : peerPlayer;
-                        let angle = Math.atan2(target.y - e.y, target.x - e.x);
-                        e.x += Math.cos(angle) * e.speed; e.y += Math.sin(angle) * e.speed;
+                for(let i = enemies.length - 1; i >= 0; i--) {
+                    let e = enemies[i];
+                    let target = e.targetId === 'host' ? player : peerPlayer;
+                    let angle = Math.atan2(target.x - e.x, target.z - e.z); // Note: Z and X for 3D atan2
+                    e.x += Math.sin(angle) * e.speed; e.z += Math.cos(angle) * e.speed;
+                    e.mesh.position.set(e.x, 0, e.z);
+                    e.mesh.rotation.y = angle;
+                    if (e.type === 'drone') e.mesh.rotation.x += 0.1; // Drones tumble
 
-                        let dHost = Math.hypot(player.x - e.x, player.y - e.y);
-                        let dClient = Math.hypot(peerPlayer.x - e.x, peerPlayer.y - e.y);
-                        
-                        // Collision Logic
-                        if (dHost < e.size + 15) {
-                            if (player.role === 'viltrumite') {
-                                if (e.type === 'brute' && player.dashTimer <= 0) player.health -= 15; 
-                                spawnExplosion(e.x, e.y, e.type === 'brute' ? '#a020f0' : '#f00');
-                                spawnBloodSplatter(e.x, e.y);
+                    // Laser Collision Check
+                    for (let j = lasers.length - 1; j >= 0; j--) {
+                        if (Math.hypot(lasers[j].x - e.x, lasers[j].z - e.z) < e.size + 15) {
+                            e.hp -= lasers[j].isClap ? 3 : 1;
+                            if (e.hp <= 0) {
+                                scene.remove(e.mesh);
                                 sharedScore += (e.type === 'brute' ? 150 : 50);
-                                enemies.splice(i, 1);
-                            } else {
-                                player.health -= (e.type === 'brute' ? 40 : 15);
-                                spawnExplosion(e.x, e.y, e.type === 'brute' ? '#a020f0' : '#f00'); 
-                                enemies.splice(i, 1);
+                                enemies.splice(i, 1); break;
                             }
-                        } else if (dClient < e.size + 15) {
-                            if (peerPlayer.role === 'viltrumite') {
-                                if (e.type === 'brute' && !peerPlayer.isDashing) peerPlayer.health -= 15; 
-                                spawnExplosion(e.x, e.y, e.type === 'brute' ? '#a020f0' : '#f00');
-                                spawnBloodSplatter(e.x, e.y);
-                                sharedScore += (e.type === 'brute' ? 150 : 50);
-                                enemies.splice(i, 1);
-                            } else {
-                                peerPlayer.health -= (e.type === 'brute' ? 40 : 15);
-                                spawnExplosion(e.x, e.y, e.type === 'brute' ? '#a020f0' : '#f00'); 
-                                enemies.splice(i, 1);
+                            if (!lasers[j].isClap) {
+                                scene.remove(lasers[j].mesh);
+                                lasers.splice(j, 1);
                             }
                         }
                     }
                 }
             }
 
-            if (player.health <= 0) {
-                player.health = player.maxHealth; player.x = 0; player.y = 0; player.vx = 0; player.vy = 0;
-                sharedScore = Math.max(0, sharedScore - 500);
-            }
+            // Camera Tracking (Trailing 3rd Person View)
+            const camOffset = new THREE.Vector3(
+                -Math.sin(player.angle) * 400, // Move back
+                300,                           // Move up
+                -Math.cos(player.angle) * 400
+            );
+            camera.position.lerp(new THREE.Vector3(player.x, 0, player.z).add(camOffset), 0.1);
+            camera.lookAt(player.x, 0, player.z);
+            pointLight.position.set(player.x, 100, player.z); // Light follows player
 
-            updateUI();
+            // UI
+            document.getElementById('scoreDisplay').innerText = sharedScore;
+            document.getElementById('health-bar').style.width = Math.max(0, (player.health / player.maxHealth) * 100) + "%";
 
+            // Networking
             if (conn && conn.open) {
                 let packet = {
-                    type: 'state', px: player.x, py: player.y, pa: player.angle, pc: player.color,
-                    pt: player.isThrusting, pct: player.chargeTimer, prole: player.role,
-                    phl: player.hyperLaserTimer > 0, pdash: player.dashTimer > 0, fired: player.justFired
+                    type: 'state', px: player.x, pz: player.z, pa: player.angle, 
+                    prole: player.role, fired: player.justFired
                 };
                 if (isHost) { 
-                    packet.enemies = enemies; 
-                    packet.score = sharedScore; 
-                    packet.p2h = peerPlayer.health; 
-                    if (newSplattersToSync.length > 0) {
-                        packet.newSplatters = newSplattersToSync;
-                        newSplattersToSync = []; // Clear after sending
-                    }
+                    packet.enemies = enemies.map(e => ({ id: e.id, type: e.type, size: e.size, x: e.x, z: e.z })); 
+                    packet.score = sharedScore; packet.p2h = peerPlayer.health; 
                 }
                 conn.send(packet);
                 player.justFired = false;
             }
         }
 
-        // --- RENDERING ---
-        function draw() {
-            let isImpact = superBlasts.length > 0;
-            let isFearFreeze = player.chargeTimer > 0 || peerPlayer.chargeTimer > 0;
-
-            if (isImpact && superBlasts[0].frame % 4 < 2) ctx.filter = 'invert(1)';
-            else if (isFearFreeze) ctx.filter = 'grayscale(100%)'; 
-            else ctx.filter = 'none';
-
-            ctx.fillStyle = '#050510'; ctx.fillRect(0, 0, width, height);
-
-            ctx.save();
-            let camX = width / 2 - player.x; let camY = height / 2 - player.y;
-            if (isImpact || player.chargeTimer > 0 || player.dashTimer > 0) { camX += (Math.random()-0.5)*15; camY += (Math.random()-0.5)*15; }
-            ctx.translate(camX, camY);
-
-            // Draw Background Grid
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.05)'; ctx.lineWidth = 2;
-            const grid = 150; const sX = Math.floor((player.x - width/2)/grid)*grid; const sY = Math.floor((player.y - height/2)/grid)*grid;
-            ctx.beginPath();
-            for (let x=sX; x<sX+width+grid; x+=grid) { ctx.moveTo(x, player.y-height); ctx.lineTo(x, player.y+height); }
-            for (let y=sY; y<sY+height+grid; y+=grid) { ctx.moveTo(player.x-width, y); ctx.lineTo(player.x+width, y); }
-            ctx.stroke();
-
-            // Draw Blood Splatters (Floor decals)
-            splatters.forEach(s => {
-                ctx.fillStyle = `rgba(139, 0, 0, ${s.life})`; // Dark crimson color
-                ctx.beginPath();
-                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
-                ctx.fill();
-            });
-
-            particles.forEach(p => { ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life); ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); });
-            ctx.globalAlpha = 1.0;
-            
-            lasers.forEach(l => { 
-                ctx.shadowBlur = 15; ctx.shadowColor = l.color; ctx.fillStyle = l.color; 
-                if (l.isHyper) {
-                    ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(Math.atan2(l.vy, l.vx));
-                    ctx.fillRect(-l.size, -l.size/2, l.size*3, l.size);
-                    ctx.restore();
-                } else if (l.isClap) {
-                    ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.angle);
-                    ctx.beginPath(); ctx.arc(0, 0, l.size, -Math.PI/2, Math.PI/2); ctx.lineWidth = 10; ctx.strokeStyle = '#fff'; ctx.stroke();
-                    ctx.restore();
-                } else {
-                    ctx.beginPath(); ctx.arc(l.x, l.y, 4, 0, Math.PI*2); ctx.fill(); 
-                }
-            });
-
-            enemies.forEach(e => {
-                ctx.save(); ctx.translate(e.x, e.y); 
-                let eColor = e.type === 'brute' ? '#a020f0' : (e.type === 'seeker' ? '#ffaa00' : '#f00');
-                ctx.shadowBlur = 15; ctx.shadowColor = eColor;
-                ctx.strokeStyle = eColor; ctx.lineWidth = 3; 
-                
-                if (e.type === 'brute') {
-                    ctx.beginPath(); ctx.rect(-20, -20, 40, 40); ctx.stroke();
-                    ctx.beginPath(); ctx.moveTo(-20,-20); ctx.lineTo(20,20); ctx.moveTo(20,-20); ctx.lineTo(-20,20); ctx.stroke(); 
-                } else if (e.type === 'seeker') {
-                    ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-8, 8); ctx.lineTo(-8, -8); ctx.closePath(); ctx.stroke(); 
-                } else {
-                    ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(-10, 15); ctx.lineTo(-10, -15); ctx.closePath(); ctx.stroke(); 
-                }
-                
-                if (isFearFreeze) { ctx.translate((Math.random()-0.5)*5, (Math.random()-0.5)*5); }
-                ctx.restore();
-            });
-
-            superBlasts.forEach(b => {
-                ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
-                ctx.fillStyle = `rgba(255, 255, 255, ${b.frame/60})`; ctx.fill();
-                ctx.lineWidth = 15 * (b.frame/60); ctx.strokeStyle = '#ffaa00'; ctx.stroke();
-            });
-
-            if (peerPlayer.x !== -9999 && peerPlayer.role !== 'none') drawEntity(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, peerPlayer.isThrusting, peerPlayer.role, peerPlayer.chargeTimer, peerPlayer.isDashing);
-            if (player.role !== 'none') drawEntity(player.x, player.y, player.angle, player.color, player.isThrusting, player.role, player.chargeTimer, player.dashTimer > 0);
-
-            ctx.restore();
+        function loop() { 
+            if (!gameRunning) return; 
+            update(); 
+            renderer.render(scene, camera);
+            requestAnimationFrame(loop); 
         }
-
-        function drawEntity(x, y, angle, color, isThrusting, role, chargeTimer, isDashing) {
-            ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
-            
-            if (role === 'viltrumite') {
-                const colors = ['#f00', '#0f0', '#00f', '#ff0', '#f0f', '#0ff', '#fff'];
-                let glow = (chargeTimer > 0 || isDashing) ? colors[Math.floor(Date.now() / 50) % colors.length] : '#ffaa00';
-                ctx.shadowBlur = (chargeTimer > 0 || isDashing) ? 40 : 25; ctx.shadowColor = glow;
-                
-                // 1. Torso
-                ctx.fillStyle = '#ffcc00'; ctx.fillRect(-15, -8, 20, 16); 
-                // 2. Boots and Legs
-                ctx.fillStyle = '#111'; ctx.fillRect(-15, -8, 5, 16); 
-                ctx.fillStyle = '#0044ff'; ctx.fillRect(-10, -8, 10, 16); 
-                // 3. Fists
-                ctx.fillStyle = '#ffcc00';
-                ctx.beginPath(); ctx.arc(22, -10, 5, 0, Math.PI*2); ctx.fill(); 
-                ctx.beginPath(); ctx.arc(22, 10, 5, 0, Math.PI*2); ctx.fill(); 
-                // 4. Head
-                ctx.fillStyle = '#ffcc99'; 
-                ctx.beginPath(); ctx.arc(12, 0, 7, 0, Math.PI*2); ctx.fill();
-                // 5. Goggles
-                ctx.fillStyle = '#ffcc00'; ctx.fillRect(10, -6, 6, 12);
-                ctx.fillStyle = '#111'; ctx.fillRect(12, -5, 4, 4); ctx.fillRect(12, 1, 4, 4);
-
-                if (isDashing) {
-                    ctx.fillStyle = 'rgba(255, 204, 0, 0.3)';
-                    ctx.fillRect(-60, -10, 40, 20);
-                }
-
-                ctx.strokeStyle = glow; ctx.lineWidth = 2;
-                ctx.beginPath(); ctx.arc(0, 0, 40 + Math.random()*5, 0, Math.PI*2); ctx.stroke();
-
-            } else if (role === 'laser') {
-                ctx.shadowBlur = 20; ctx.shadowColor = '#00ffff'; ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 3; ctx.fillStyle = '#111';
-                ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(-15, 15); ctx.lineTo(-10, 0); ctx.lineTo(-15, -15); ctx.closePath();
-                ctx.fill(); ctx.stroke();
-
-                if (isThrusting) {
-                    ctx.fillStyle = '#fff'; ctx.shadowColor = '#00ffff';
-                    ctx.beginPath(); ctx.moveTo(-12, -5); ctx.lineTo(-25, 0); ctx.lineTo(-12, 5); ctx.fill();
-                }
-            }
-            ctx.restore();
-        }
-
-        function loop() { if (!gameRunning) return; update(); draw(); requestAnimationFrame(loop); }
+        
         function startGame() { 
-            gameRunning = true; player.x = isHost ? -100 : 100; 
+            gameRunning = true; 
+            player.x = isHost ? -100 : 100; 
             if (isHost) {
                 player.role = Math.random() > 0.5 ? 'viltrumite' : 'laser';
-                applyRoleStats(player);
+                initPlayerMeshes();
             }
             requestAnimationFrame(loop); 
         }
