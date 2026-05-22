@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Vanguard: Full 3D</title>
+    <title>Neon Vanguard: 3D Climax</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -15,7 +15,6 @@
         }
         #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
         
-        /* UI Elements (Z-Index ensures they float above the 3D canvas) */
         #menu {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(10, 10, 20, 0.9); padding: 30px;
@@ -27,8 +26,7 @@
             width: 90%; padding: 12px; margin: 10px 0; background: #111; color: #0ff;
             border: 1px solid #0ff; border-radius: 8px; font-family: inherit; font-size: 16px;
         }
-        button { cursor: pointer; font-weight: bold; transition: 0.2s; }
-        button:active { background: #0ff; color: #000; }
+        button { cursor: pointer; font-weight: bold; }
         #my-id-display { font-weight: bold; color: #f0f; margin-bottom: 15px; word-break: break-all; }
 
         #hud {
@@ -39,6 +37,7 @@
         }
         .health-bar-container { width: 200px; height: 15px; border: 2px solid #fff; margin: 10px auto; border-radius: 10px; overflow: hidden; }
         #health-bar { width: 100%; height: 100%; background: #0f0; transition: width 0.2s, background 0.2s; }
+        .hud-text { font-size: 16px; margin-top: 5px; text-shadow: 0 0 5px currentColor; }
 
         #controls {
             position: absolute; bottom: 30px; left: 0; width: 100%;
@@ -54,14 +53,21 @@
         }
         .btn:active { background: rgba(0, 255, 255, 0.5); }
         .btn-action { border-color: #f0f; color: #f0f; }
+        .btn-super { border-color: #ffaa00; color: #ffaa00; box-shadow: 0 0 15px currentColor; display: none; }
         .btn-brake { border-color: #ff3333; color: #ff3333; }
         .btn-dash { border-color: #ffaa00; color: #ffaa00; background: rgba(255, 170, 0, 0.1); }
+        
+        /* Impact Frame Overlay */
+        #impact-overlay {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background: #fff; mix-blend-mode: difference; display: none; pointer-events: none; z-index: 2;
+        }
     </style>
 </head>
 <body>
 
     <div id="menu">
-        <h2>3D CO-OP VANGUARD</h2>
+        <h2>3D VILTRUM PROTOCOL</h2>
         <p>Your Link ID:</p>
         <div id="my-id-display">Generating Link...</div>
         <input type="text" id="friend-id" placeholder="Wingman's ID">
@@ -72,6 +78,7 @@
     <div id="hud">
         SCORE: <span id="scoreDisplay">0</span>
         <div class="health-bar-container"><div id="health-bar"></div></div>
+        <div id="super-text" class="hud-text" style="color: #ffaa00; display: none;">READY</div>
     </div>
 
     <div id="controls">
@@ -81,6 +88,7 @@
         </div>
         <div class="control-group">
             <div class="control-group-col">
+                <div class="btn btn-super" id="btn-super">SUPER</div>
                 <div class="btn btn-action" id="btn-fire">FIRE</div>
                 <div class="btn btn-brake" id="btn-brake">STOP</div>
             </div>
@@ -88,127 +96,118 @@
         </div>
     </div>
 
+    <div id="impact-overlay"></div>
     <div id="game-container"></div>
 
     <script>
-        // --- THREE.JS 3D ENGINE SETUP ---
         const container = document.getElementById('game-container');
+        const overlay = document.getElementById('impact-overlay');
         const scene = new THREE.Scene();
         scene.fog = new THREE.FogExp2(0x050510, 0.001);
 
-        // Isometric-style trailing camera
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 3000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         container.appendChild(renderer.domElement);
 
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0x404040, 2); 
-        scene.add(ambientLight);
-        const pointLight = new THREE.PointLight(0x00ffff, 1.5, 1000);
+        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+        const pointLight = new THREE.PointLight(0xffaa00, 2, 1200);
         scene.add(pointLight);
 
-        // Neon Grid Floor
-        const gridHelper = new THREE.GridHelper(4000, 40, 0x00ffff, 0x003333);
+        const gridHelper = new THREE.GridHelper(4000, 40, 0x00ffff, 0x002222);
         gridHelper.position.y = -20;
         scene.add(gridHelper);
 
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-
-        // --- 3D MESH GENERATORS ---
+        // --- IMPROVED PROCEDURAL VILTRUMITE MESH ---
         function createViltrumiteMesh() {
             const group = new THREE.Group();
             
-            // Torso (Yellow)
-            const torsoGeo = new THREE.BoxGeometry(16, 20, 10);
+            // Suit Base (Blue Legs, Yellow Torso)
+            const torsoGeo = new THREE.BoxGeometry(14, 20, 10);
             const torsoMat = new THREE.MeshLambertMaterial({ color: 0xffcc00 });
             const torso = new THREE.Mesh(torsoGeo, torsoMat);
             torso.position.y = 10;
             group.add(torso);
 
-            // Legs (Blue)
-            const legGeo = new THREE.BoxGeometry(14, 15, 8);
-            const legMat = new THREE.MeshLambertMaterial({ color: 0x0044ff });
-            const legs = new THREE.Mesh(legGeo, legMat);
-            legs.position.y = -8;
+            const legsGeo = new THREE.BoxGeometry(12, 14, 9);
+            const legsMat = new THREE.MeshLambertMaterial({ color: 0x0044ff });
+            const legs = new THREE.Mesh(legsGeo, legsMat);
+            legs.position.y = -7;
             group.add(legs);
 
-            // Head
-            const headGeo = new THREE.BoxGeometry(12, 12, 12);
+            // Head & Iconic Goggles
+            const headGeo = new THREE.BoxGeometry(11, 11, 11);
             const headMat = new THREE.MeshLambertMaterial({ color: 0xffcc99 });
             const head = new THREE.Mesh(headGeo, headMat);
-            head.position.y = 26;
+            head.position.y = 25;
             group.add(head);
 
-            // Flowing Hair (Attached to head)
-            const hairGeo = new THREE.ConeGeometry(5, 15, 4);
-            const hairMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
-            const hair1 = new THREE.Mesh(hairGeo, hairMat);
-            hair1.position.set(-4, 6, -5);
-            hair1.rotation.x = -Math.PI / 4;
-            const hair2 = new THREE.Mesh(hairGeo, hairMat);
-            hair2.position.set(4, 6, -5);
-            hair2.rotation.x = -Math.PI / 4;
-            head.add(hair1);
-            head.add(hair2);
+            const goggleGeo = new THREE.BoxGeometry(12, 4, 2);
+            const goggleMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+            const goggles = new THREE.Mesh(goggleGeo, goggleMat);
+            goggles.position.set(0, 1, 5);
+            head.add(goggles);
 
-            // Flowing Cape
-            const capeGeo = new THREE.PlaneGeometry(20, 40);
-            const capeMat = new THREE.MeshLambertMaterial({ color: 0xff0000, side: THREE.DoubleSide });
-            const cape = new THREE.Mesh(capeGeo, capeMat);
-            cape.position.set(0, 10, -8);
-            cape.rotation.x = -Math.PI / 6;
-            group.add(cape);
+            // Real-time Segmented Cape Geometry for Smooth Flowing Trailing Physics
+            const capeGroup = new THREE.Group();
+            capeGroup.position.set(0, 18, -5);
+            
+            const segmentGeo = new THREE.BoxGeometry(16, 6, 1);
+            const capeMat = new THREE.MeshLambertMaterial({ color: 0xcc0000, side: THREE.DoubleSide });
+            const segments = [];
+            
+            let lastSegment = capeGroup;
+            for(let i=0; i<6; i++) {
+                const seg = new THREE.Mesh(segmentGeo, capeMat);
+                seg.position.set(0, -3, -0.5);
+                const pivot = new THREE.Group();
+                pivot.position.set(0, (i === 0 ? 0 : -6), 0);
+                pivot.add(seg);
+                lastSegment.add(pivot);
+                segments.push(pivot);
+                lastSegment = pivot;
+            }
+            group.add(capeGroup);
 
             // Fists
-            const fistGeo = new THREE.SphereGeometry(4, 8, 8);
+            const fistGeo = new THREE.BoxGeometry(4, 4, 4);
             const fistMat = new THREE.MeshLambertMaterial({ color: 0xffcc00 });
-            const fistL = new THREE.Mesh(fistGeo, fistMat);
-            fistL.position.set(-12, 10, 10);
-            const fistR = new THREE.Mesh(fistGeo, fistMat);
-            fistR.position.set(12, 10, 10);
-            group.add(fistL);
-            group.add(fistR);
+            const fistL = new THREE.Mesh(fistGeo, fistMat); fistL.position.set(-10, 8, 12); group.add(fistL);
+            const fistR = new THREE.Mesh(fistGeo, fistMat); fistR.position.set(10, 8, 12); group.add(fistR);
 
-            group.userData = { cape: cape, head: head, hair1: hair1, hair2: hair2 };
+            // Rainbow Aura Shell for Charge-up Move
+            const auraGeo = new THREE.SphereGeometry(30, 16, 16);
+            const auraMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, wireframe: true, transparent: true, opacity: 0 });
+            const aura = new THREE.Mesh(auraGeo, auraMat);
+            group.add(aura);
+
+            group.userData = { capeSegments: segments, head: head, aura: aura, torso: torso };
             return group;
         }
 
         function createLaserShipMesh() {
             const group = new THREE.Group();
-            
-            const bodyGeo = new THREE.CylinderGeometry(0, 15, 40, 4);
-            const bodyMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+            const bodyGeo = new THREE.CylinderGeometry(0, 12, 35, 4);
+            const bodyMat = new THREE.MeshLambertMaterial({ color: 0x111116 });
             const body = new THREE.Mesh(bodyGeo, bodyMat);
-            body.rotation.x = Math.PI / 2; // Point forward
-            body.rotation.y = Math.PI / 4; // Diamond shape
+            body.rotation.x = Math.PI / 2; body.rotation.y = Math.PI / 4;
             
-            // Neon outlines
-            const edges = new THREE.EdgesGeometry(bodyGeo);
-            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x00ffff }));
-            line.rotation.x = Math.PI / 2;
-            line.rotation.y = Math.PI / 4;
+            const line = new THREE.LineSegments(new THREE.EdgesGeometry(bodyGeo), new THREE.LineBasicMaterial({ color: 0x00ffff }));
+            line.rotation.x = Math.PI / 2; line.rotation.y = Math.PI / 4;
 
-            group.add(body);
-            group.add(line);
+            group.add(body); group.add(line);
             return group;
         }
 
-        // --- P2P NETWORK SETUP ---
+        // --- MULTIPLAYER CO-OP SYNC ---
         const peer = new Peer();
         let conn = null; let isHost = false;
         
         peer.on('open', id => document.getElementById('my-id-display').innerText = id);
         peer.on('connection', connection => { conn = connection; isHost = true; setupConnection(); });
-
         document.getElementById('join-btn').addEventListener('click', () => {
             const friendId = document.getElementById('friend-id').value.trim();
             if (!friendId) return;
-            document.getElementById('status').innerText = "Linking...";
             conn = peer.connect(friendId);
             setupConnection();
         });
@@ -223,29 +222,28 @@
 
             conn.on('data', data => {
                 if (data.type === 'state') {
-                    peerPlayer.x = data.px; peerPlayer.z = data.pz;
-                    peerPlayer.angle = data.pa; 
-                    peerPlayer.role = data.prole;
+                    peerPlayer.x = data.px; peerPlayer.z = data.pz; peerPlayer.angle = data.pa; 
+                    peerPlayer.chargeTimer = data.pct; peerPlayer.role = data.prole; peerPlayer.isDashing = data.pdash;
+                    peerPlayer.isHyperLaser = data.phl;
 
-                    // Initialize meshes if roles are assigned
                     if (!isHost && player.role === 'none') {
                         player.role = data.prole === 'viltrumite' ? 'laser' : 'viltrumite';
                         initPlayerMeshes();
                     }
-
-                    if (data.fired) spawnLaser(peerPlayer.x, peerPlayer.z, peerPlayer.angle, peerPlayer.role === 'viltrumite');
-                    
-                    if (!isHost) {
-                        syncEnemies(data.enemies || []);
-                        sharedScore = data.score !== undefined ? data.score : sharedScore;
-                        player.health = data.p2h;
-                    }
+                    if (data.fired) spawnLaser(peerPlayer.x, peerPlayer.z, peerPlayer.angle, peerPlayer.role === 'viltrumite', data.phl);
+                } else if (data.type === 'super_trigger') {
+                    triggerSuperBlastAnimation(data.x, data.z);
+                }
+                if (!isHost && data.type === 'state') {
+                    syncEnemies(data.enemies || []);
+                    sharedScore = data.score !== undefined ? data.score : sharedScore;
+                    player.health = data.p2h;
                 }
             });
         }
 
-        // --- INPUT HANDLING ---
-        const keys = { left: false, right: false, gas: false, brake: false, fire: false };
+        // --- INPUT CONTROLS ---
+        const keys = { left: false, right: false, gas: false, brake: false };
         const bindBtn = (id, key) => {
             const el = document.getElementById(id);
             el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; });
@@ -253,11 +251,11 @@
             el.addEventListener('mousedown', () => keys[key] = true);
             el.addEventListener('mouseup', () => keys[key] = false);
         };
-        bindBtn('btn-left', 'left'); bindBtn('btn-right', 'right');
-        bindBtn('btn-gas', 'gas'); bindBtn('btn-brake', 'brake'); 
-        
-        document.getElementById('btn-fire').addEventListener('touchstart', (e) => { e.preventDefault(); tryFire(); });
+        bindBtn('btn-left', 'left'); bindBtn('btn-right', 'right'); bindBtn('btn-gas', 'gas'); bindBtn('btn-brake', 'brake');
+        document.getElementById('btn-super').addEventListener('mousedown', () => trySuper());
+        document.getElementById('btn-super').addEventListener('touchstart', (e) => { e.preventDefault(); trySuper(); });
         document.getElementById('btn-fire').addEventListener('mousedown', () => tryFire());
+        document.getElementById('btn-fire').addEventListener('touchstart', (e) => { e.preventDefault(); tryFire(); });
 
         window.addEventListener('keydown', e => {
             if(e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
@@ -265,274 +263,271 @@
             if(e.key === 'ArrowUp' || e.key === 'w') keys.gas = true;
             if(e.key === 'ArrowDown' || e.key === 's') keys.brake = true;
             if(e.key === ' ') tryFire();
+            if(e.key === 'Shift') trySuper();
         });
         window.addEventListener('keyup', e => {
             if(['ArrowLeft','a','ArrowRight','d','ArrowUp','w','ArrowDown','s'].includes(e.key)) keys[e.key==='ArrowUp'||e.key==='w'?'gas':e.key==='ArrowDown'||e.key==='s'?'brake':e.key==='ArrowLeft'||e.key==='a'?'left':'right'] = false;
         });
 
-        // --- GAME ENTITIES (3D coordinates use X and Z) ---
+        // --- PHYSICS & LOGIC MECHANICS ---
         let gameRunning = false; let sharedScore = 0; let clock = new THREE.Clock();
-        
-        const player = { 
-            x: 0, z: 0, vx: 0, vz: 0, angle: 0, mesh: null, 
-            isThrusting: false, justFired: false, cooldown: 0,
-            health: 100, maxHealth: 100, role: 'none'
-        };
-        const peerPlayer = { x: -9999, z: -9999, angle: 0, mesh: null, role: 'none' };
-        
-        let lasers = []; let enemies = [];
+        const player = { x: 0, z: 0, vx: 0, vz: 0, angle: 0, mesh: null, cooldown: 0, health: 100, maxHealth: 100, role: 'none', superCooldown: 0, chargeTimer: 0, hyperLaserTimer: 0, dashTimer: 0 };
+        const peerPlayer = { x: -9999, z: -9999, angle: 0, mesh: null, role: 'none', chargeTimer: 0, isHyperLaser: false, isDashing: false };
+        let lasers = []; let enemies = []; let blastWaves = [];
 
         function initPlayerMeshes() {
-            // Apply Stats
-            player.maxHealth = player.role === 'viltrumite' ? 800 : 200;
-            player.health = player.maxHealth;
-
+            player.maxHealth = player.role === 'viltrumite' ? 800 : 200; player.health = player.maxHealth;
             if (player.role === 'viltrumite') {
-                player.mesh = createViltrumiteMesh();
-                peerPlayer.mesh = createLaserShipMesh();
+                player.mesh = createViltrumiteMesh(); peerPlayer.mesh = createLaserShipMesh();
                 document.getElementById('btn-fire').innerText = "CLAP";
-                document.getElementById('btn-brake').innerText = "DASH";
-                document.getElementById('btn-brake').className = "btn btn-dash"; 
+                let brk = document.getElementById('btn-brake'); brk.innerText = "DASH"; brk.className = "btn btn-dash";
             } else {
-                player.mesh = createLaserShipMesh();
-                peerPlayer.mesh = createViltrumiteMesh();
+                player.mesh = createLaserShipMesh(); peerPlayer.mesh = createViltrumiteMesh();
             }
-            scene.add(player.mesh);
-            scene.add(peerPlayer.mesh);
+            scene.add(player.mesh); scene.add(peerPlayer.mesh);
         }
 
         function tryFire() {
-            if (player.cooldown <= 0) {
-                spawnLaser(player.x, player.z, player.angle, player.role === 'viltrumite');
+            if (player.cooldown <= 0 && player.chargeTimer <= 0) {
+                spawnLaser(player.x, player.z, player.angle, player.role === 'viltrumite', player.hyperLaserTimer > 0);
                 player.justFired = true;
-                player.cooldown = player.role === 'viltrumite' ? 20 : 15;
+                player.cooldown = player.hyperLaserTimer > 0 ? 5 : (player.role === 'viltrumite' ? 20 : 15);
             }
         }
 
-        function spawnLaser(x, z, angle, isViltrumite) {
-            let mesh;
+        function trySuper() {
+            if (player.superCooldown <= 0 && player.chargeTimer <= 0 && player.role !== 'none') {
+                if (player.role === 'viltrumite') {
+                    player.chargeTimer = 120; // Initiates the 2-second epic multi-color tracking sequence
+                } else {
+                    player.hyperLaserTimer = 300;
+                }
+                player.superCooldown = 900;
+            }
+        }
+
+        function triggerSuperBlastAnimation(x, z) {
+            const geo = new THREE.SphereGeometry(10, 32, 32);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.8, wireframe: true });
+            const blastMesh = new THREE.Mesh(geo, mat);
+            blastMesh.position.set(x, 0, z);
+            scene.add(blastMesh);
+            blastWaves.push({ mesh: blastMesh, radius: 10, maxRadius: 1600, frame: 45 });
+        }
+
+        function spawnLaser(x, z, angle, isViltrumite, isHyper) {
+            let geo, mat;
             if (isViltrumite) {
-                // Sonic Clap (Wide 3D crescent using a squashed torus)
-                const geo = new THREE.TorusGeometry(20, 2, 8, 24, Math.PI);
-                const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-                mesh = new THREE.Mesh(geo, mat);
-                mesh.rotation.x = Math.PI / 2;
-                mesh.rotation.z = angle;
+                geo = new THREE.TorusGeometry(30, 3, 8, 24, Math.PI);
+                mat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
             } else {
-                // Standard Neon Laser
-                const geo = new THREE.SphereGeometry(4, 8, 8);
-                const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
-                mesh = new THREE.Mesh(geo, mat);
+                geo = new THREE.CylinderGeometry(isHyper ? 8 : 2, isHyper ? 8 : 2, isHyper ? 100 : 30, 4);
+                mat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
             }
-            
-            // Offset spawn point
-            mesh.position.set(x + Math.sin(angle)*30, 0, z + Math.cos(angle)*30);
-            scene.add(mesh);
-
-            lasers.push({
-                mesh: mesh,
-                x: mesh.position.x, z: mesh.position.z,
-                vx: Math.sin(angle) * (isViltrumite ? 25 : 30),
-                vz: Math.cos(angle) * (isViltrumite ? 25 : 30),
-                isClap: isViltrumite, age: 0
-            });
+            const m = new THREE.Mesh(geo, mat);
+            m.rotation.x = Math.PI / 2; m.rotation.z = angle + (isViltrumite ? Math.PI/2 : 0);
+            m.position.set(x + Math.sin(angle)*25, 0, z + Math.cos(angle)*25);
+            scene.add(m);
+            lasers.push({ mesh: m, x: m.position.x, z: m.position.z, vx: Math.sin(angle)*25, vz: Math.cos(angle)*25, isClap: isViltrumite, isHyper: isHyper, age: 0 });
         }
 
-        // Create 3D Enemies
         function createEnemyMesh(type) {
-            let mesh;
-            if (type === 'brute') {
-                mesh = new THREE.Mesh(new THREE.BoxGeometry(40, 40, 40), new THREE.MeshLambertMaterial({ color: 0xa020f0 }));
-            } else {
-                mesh = new THREE.Mesh(new THREE.TetrahedronGeometry(15), new THREE.MeshLambertMaterial({ color: 0xff0000 }));
-            }
-            scene.add(mesh);
-            return mesh;
+            let m = new THREE.Mesh(
+                type === 'brute' ? new THREE.BoxGeometry(35, 35, 35) : new THREE.ConeGeometry(10, 25, 4),
+                new THREE.MeshLambertMaterial({ color: type === 'brute' ? 0x9900ff : 0xff0055 })
+            );
+            scene.add(m); return m;
         }
 
-        function syncEnemies(serverEnemies) {
-            // Match local meshes to server data (simplified for this demo)
-            while (enemies.length < serverEnemies.length) {
-                let eData = serverEnemies[enemies.length];
-                enemies.push({ id: eData.id, type: eData.type, size: eData.size, mesh: createEnemyMesh(eData.type) });
+        function syncEnemies(serverData) {
+            while (enemies.length < serverData.length) {
+                let d = serverData[enemies.length];
+                enemies.push({ id: d.id, type: d.type, size: d.size, mesh: createEnemyMesh(d.type) });
             }
-            while (enemies.length > serverEnemies.length) {
-                let e = enemies.pop();
-                scene.remove(e.mesh);
-            }
-            // Update positions
-            for(let i=0; i<serverEnemies.length; i++) {
-                enemies[i].mesh.position.set(serverEnemies[i].x, 0, serverEnemies[i].z);
+            while (enemies.length > serverData.length) { scene.remove(enemies.pop().mesh); }
+            for(let i=0; i<serverData.length; i++) {
+                enemies[i].mesh.position.set(serverData[i].x, 0, serverData[i].z);
             }
         }
 
         function update() {
             const time = clock.getElapsedTime();
+            let isFearFreeze = player.chargeTimer > 0 || peerPlayer.chargeTimer > 0;
 
-            let turnSpeed = player.role === 'viltrumite' ? 0.08 : 0.05; 
-            let accel = player.role === 'viltrumite' ? 1.5 : 0.8; 
-
-            if (keys.left) player.angle += turnSpeed; // In 3D space, + angle turns left
-            if (keys.right) player.angle -= turnSpeed;
-
-            // Dashing Logic (Viltrumite)
-            if (player.role === 'viltrumite' && keys.brake) {
-                player.vx = Math.sin(player.angle) * 35; 
-                player.vz = Math.cos(player.angle) * 35;
+            if (player.chargeTimer > 0) {
+                player.chargeTimer--;
+                player.vx *= 0.7; player.vz *= 0.7;
+                if (player.chargeTimer === 1) {
+                    triggerSuperBlastAnimation(player.x, player.z);
+                    if (conn && conn.open) conn.send({ type: 'super_trigger', x: player.x, z: player.z });
+                }
+            } else if (player.role === 'viltrumite' && keys.brake && player.dashTimer <= 0) {
+                player.dashTimer = 15;
+            } else if (player.dashTimer > 0) {
+                player.dashTimer--;
+                player.vx = Math.sin(player.angle) * 40; player.vz = Math.cos(player.angle) * 40;
             } else {
-                player.isThrusting = keys.gas;
-                if (keys.gas) { 
-                    player.vx += Math.sin(player.angle) * accel; 
-                    player.vz += Math.cos(player.angle) * accel; 
-                }
-                
-                if (player.role === 'laser' && keys.brake) { 
-                    player.vx *= 0.80; player.vz *= 0.80; 
-                } else { 
-                    player.vx *= 0.95; player.vz *= 0.95; 
-                }
+                let turn = player.role === 'viltrumite' ? 0.11 : 0.06;
+                let acc = player.role === 'viltrumite' ? 1.2 : 0.6;
+                if (keys.left) player.angle += turn; if (keys.right) player.angle -= turn;
+                if (keys.gas) { player.vx += Math.sin(player.angle)*acc; player.vz += Math.cos(player.angle)*acc; }
+                let decay = (player.role === 'laser' && keys.brake) ? 0.78 : 0.94;
+                player.vx *= decay; player.vz *= decay;
             }
 
             player.x += player.vx; player.z += player.vz;
             if(player.cooldown > 0) player.cooldown--;
+            if(player.superCooldown > 0) player.superCooldown--;
+            if(player.hyperLaserTimer > 0) player.hyperLaserTimer--;
 
-            // Update Player Mesh & Procedural Animations
+            // --- ANIMATION ENGINE REWORK ---
             if (player.mesh) {
                 player.mesh.position.set(player.x, 0, player.z);
                 player.mesh.rotation.y = player.angle;
+                const speed = Math.hypot(player.vx, player.vz);
 
-                // FLUID ANIMATION: The Viltrumite's Cape & Hair physics
                 if (player.role === 'viltrumite') {
-                    const speed = Math.hypot(player.vx, player.vz);
-                    const userData = player.mesh.userData;
+                    const ud = player.mesh.userData;
                     
-                    // Cape flaps faster the faster you move
-                    userData.cape.rotation.x = -Math.PI / 6 + Math.sin(time * 15) * (0.2 + speed * 0.02);
-                    
-                    // Hair flows back based on speed
-                    userData.hair1.rotation.x = -Math.PI / 4 - (speed * 0.05) + Math.sin(time * 10) * 0.1;
-                    userData.hair2.rotation.x = -Math.PI / 4 - (speed * 0.05) + Math.cos(time * 10) * 0.1;
+                    // FIXED CAPE PHYSICS: Follows trailing velocity vector correctly, flowing backward horizontally
+                    let segmentWave = Math.sin(time * 22 + speed * 0.1) * (0.12 + speed * 0.015);
+                    ud.capeSegments.forEach((seg, index) => {
+                        seg.rotation.z = segmentWave * 0.7; // Wind flutter lateral
+                        seg.rotation.x = (Math.PI / 8) + (speed * 0.03) + (Math.cos(time * 15 + index) * 0.05); // Trailing velocity angle
+                    });
 
-                    // Body leans into the movement
-                    player.mesh.rotation.x = speed * 0.02; 
+                    // Charging Super Move Animation Loop
+                    if (player.chargeTimer > 0) {
+                        ud.aura.material.opacity = 0.7 + Math.sin(time * 30) * 0.2;
+                        // Multi-color strobe phase shift
+                        ud.aura.material.color.setHSL((time * 3) % 1.0, 1.0, 0.6);
+                        ud.torso.position.y = 10 + Math.sin(time * 40) * 1.5; // Vibrating transformation tracking
+                    } else {
+                        ud.aura.material.opacity = 0;
+                        ud.torso.position.y = 10;
+                    }
                 } else {
-                    // Ship hovering animation
-                    player.mesh.position.y = Math.sin(time * 5) * 5;
-                    player.mesh.rotation.z = -player.vx * 0.05; // Bank into turns
+                    player.mesh.position.y = Math.sin(time * 6) * 3;
+                    player.mesh.rotation.z = -player.vx * 0.04;
                 }
             }
 
-            // Sync Peer Mesh
+            // Sync Peer Render Matrix
             if (peerPlayer.mesh) {
                 peerPlayer.mesh.position.set(peerPlayer.x, 0, peerPlayer.z);
                 peerPlayer.mesh.rotation.y = peerPlayer.angle;
-                // Basic peer animation
                 if (peerPlayer.role === 'viltrumite') {
-                    peerPlayer.mesh.userData.cape.rotation.x = -Math.PI / 6 + Math.sin(time * 15) * 0.3;
+                    const ud = peerPlayer.mesh.userData;
+                    let pSpeed = isFearFreeze ? 0 : 10;
+                    ud.capeSegments.forEach((seg) => {
+                        seg.rotation.x = (Math.PI / 8) + (Math.sin(time * 20) * 0.1);
+                    });
+                    if (peerPlayer.chargeTimer > 0) {
+                        ud.aura.material.opacity = 0.7;
+                        ud.aura.material.color.setHSL((time * 3) % 1.0, 1.0, 0.6);
+                    } else { ud.aura.material.opacity = 0; }
                 } else {
-                    peerPlayer.mesh.position.y = Math.sin(time * 5) * 5;
+                    peerPlayer.mesh.position.y = Math.sin(time * 6) * 3;
                 }
             }
 
-            // Move Lasers
+            // Blastwaves & Screen-shake/Impact Frame Inversion Processing
+            let isExploding = false;
+            for(let i=blastWaves.length-1; i>=0; i--) {
+                let b = blastWaves[i];
+                b.radius += (b.maxRadius - b.radius) * 0.18;
+                b.mesh.scale.setScalar(b.radius / 10);
+                b.frame--;
+                if (b.frame > 40) isExploding = true; // High-intensity flash trigger frame range
+                
+                if (isHost) {
+                    for(let j=enemies.length-1; j>=0; j--) {
+                        if (Math.hypot(b.mesh.position.x - enemies[j].mesh.position.x, b.mesh.position.z - enemies[j].mesh.position.z) < b.radius) {
+                            scene.remove(enemies[j].mesh); enemies.splice(j, 1); sharedScore += 50;
+                        }
+                    }
+                }
+                if (b.frame <= 0) { scene.remove(b.mesh); blastWaves.splice(i, 1); }
+            }
+
+            // Dynamic Camera Control: Zooms out during charging, shakes on impact frames
+            let targetCamDist = isFearFreeze ? 650 : 450;
+            let targetCamHeight = isFearFreeze ? 450 : 320;
+            const camOffset = new THREE.Vector3(-Math.sin(player.angle)*targetCamDist, targetCamHeight, -Math.cos(player.angle)*targetCamDist);
+            let desiredCamPos = new THREE.Vector3(player.x, 0, player.z).add(camOffset);
+            
+            if (isExploding || player.dashTimer > 0) {
+                desiredCamPos.x += (Math.random()-0.5)*28;
+                desiredCamPos.y += (Math.random()-0.5)*28;
+                overlay.style.display = (tick % 4 < 2) ? 'block' : 'none'; // Flashes inverted impact frame overlays
+            } else {
+                overlay.style.display = 'none';
+            }
+            camera.position.lerp(desiredCamPos, 0.08);
+            camera.lookAt(player.x, 0, player.z);
+            pointLight.position.set(player.x, 80, player.z);
+
+            // Lasers Processing Loop
             for (let i = lasers.length - 1; i >= 0; i--) {
-                let l = lasers[i]; 
-                l.x += l.vx; l.z += l.vz; 
-                l.mesh.position.set(l.x, 0, l.z);
-                l.age++;
-                if (l.age > (l.isClap ? 40 : 100)) { 
-                    scene.remove(l.mesh);
-                    lasers.splice(i, 1); 
-                }
-            }
-
-            // Host Enemy Logic
-            if (isHost) {
-                if (Math.random() < 0.05 && enemies.length < 30) {
-                    let t = Math.random() > 0.5 ? player : peerPlayer;
-                    let type = Math.random() > 0.8 ? 'brute' : 'drone';
-                    let e = { 
-                        id: Math.random(), type: type, 
-                        size: type === 'brute' ? 30 : 15, 
-                        hp: type === 'brute' ? 5 : 1, speed: type === 'brute' ? 2 : 5,
-                        x: t.x + Math.sin(Math.random()*Math.PI*2)*1200, 
-                        z: t.z + Math.cos(Math.random()*Math.PI*2)*1200, 
-                        targetId: t === player ? 'host' : 'client' 
-                    };
-                    e.mesh = createEnemyMesh(e.type);
-                    enemies.push(e);
-                }
-
-                for(let i = enemies.length - 1; i >= 0; i--) {
-                    let e = enemies[i];
-                    let target = e.targetId === 'host' ? player : peerPlayer;
-                    let angle = Math.atan2(target.x - e.x, target.z - e.z); // Note: Z and X for 3D atan2
-                    e.x += Math.sin(angle) * e.speed; e.z += Math.cos(angle) * e.speed;
-                    e.mesh.position.set(e.x, 0, e.z);
-                    e.mesh.rotation.y = angle;
-                    if (e.type === 'drone') e.mesh.rotation.x += 0.1; // Drones tumble
-
-                    // Laser Collision Check
-                    for (let j = lasers.length - 1; j >= 0; j--) {
-                        if (Math.hypot(lasers[j].x - e.x, lasers[j].z - e.z) < e.size + 15) {
-                            e.hp -= lasers[j].isClap ? 3 : 1;
-                            if (e.hp <= 0) {
-                                scene.remove(e.mesh);
-                                sharedScore += (e.type === 'brute' ? 150 : 50);
-                                enemies.splice(i, 1); break;
-                            }
-                            if (!lasers[j].isClap) {
-                                scene.remove(lasers[j].mesh);
-                                lasers.splice(j, 1);
-                            }
+                let l = lasers[i]; l.x += l.vx; l.z += l.vz; l.mesh.position.set(l.x, 0, l.z); l.age++;
+                if (l.age > (l.isHyper ? 45 : (l.isClap ? 40 : 90))) { scene.remove(l.mesh); lasers.splice(i, 1); continue; }
+                if (isHost) {
+                    for(let j=enemies.length-1; j>=0; j--) {
+                        if (Math.hypot(l.x - enemies[j].mesh.position.x, l.z - enemies[j].mesh.position.z) < enemies[j].size + 15) {
+                            enemies[j].hp -= (l.isHyper ? 5 : (l.isClap ? 3 : 1));
+                            if (enemies[j].hp <= 0) { scene.remove(enemies[j].mesh); sharedScore += 100; enemies.splice(j, 1); }
+                            if (!l.isHyper && !l.isClap) { scene.remove(l.mesh); lasers.splice(i, 1); break; }
                         }
                     }
                 }
             }
 
-            // Camera Tracking (Trailing 3rd Person View)
-            const camOffset = new THREE.Vector3(
-                -Math.sin(player.angle) * 400, // Move back
-                300,                           // Move up
-                -Math.cos(player.angle) * 400
-            );
-            camera.position.lerp(new THREE.Vector3(player.x, 0, player.z).add(camOffset), 0.1);
-            camera.lookAt(player.x, 0, player.z);
-            pointLight.position.set(player.x, 100, player.z); // Light follows player
+            // Host Enemy Processing
+            if (isHost) {
+                if (Math.random() < 0.05 && enemies.length < 35 && !isFearFreeze) {
+                    let t = Math.random() > 0.5 ? player : peerPlayer;
+                    let type = Math.random() > 0.82 ? 'brute' : 'drone';
+                    enemies.push({ id: Math.random(), type: type, size: type==='brute'?35:15, hp: type==='brute'?5:1, speed: type==='brute'?1.8:5, x: t.x + Math.sin(Math.random()*Math.PI*2)*1100, z: t.z + Math.cos(Math.random()*Math.PI*2)*1100, targetId: t === player ? 'host' : 'client' });
+                }
+                if (!isFearFreeze) {
+                    for(let i=enemies.length-1; i>=0; i--) {
+                        let e = enemies[i]; let target = e.targetId==='host'?player:peerPlayer;
+                        let ang = Math.atan2(target.x - e.x, target.z - e.z);
+                        e.x += Math.sin(ang)*e.speed; e.z += Math.cos(ang)*e.speed;
+                        
+                        // Collision checks
+                        if (Math.hypot(player.x - e.x, player.z - e.z) < e.size + 15) {
+                            if (player.role === 'viltrumite') { sharedScore += 50; } else { player.health -= (e.type==='brute'?40:15); }
+                            scene.remove(e.mesh); enemies.splice(i, 1);
+                        } else if (Math.hypot(peerPlayer.x - e.x, peerPlayer.z - e.z) < e.size + 15) {
+                            if (peerPlayer.role === 'viltrumite') { sharedScore += 50; } else { peerPlayer.health -= (e.type==='brute'?40:15); }
+                            scene.remove(e.mesh); enemies.splice(i, 1);
+                        }
+                    }
+                }
+            }
 
-            // UI
+            if (player.health <= 0) {
+                player.health = player.maxHealth; player.x = 0; player.z = 0; player.vx = 0; player.vz = 0;
+                sharedScore = Math.max(0, sharedScore - 500);
+            }
+
             document.getElementById('scoreDisplay').innerText = sharedScore;
             document.getElementById('health-bar').style.width = Math.max(0, (player.health / player.maxHealth) * 100) + "%";
 
-            // Networking
+            // Network Packet Assembly
             if (conn && conn.open) {
-                let packet = {
-                    type: 'state', px: player.x, pz: player.z, pa: player.angle, 
-                    prole: player.role, fired: player.justFired
-                };
-                if (isHost) { 
-                    packet.enemies = enemies.map(e => ({ id: e.id, type: e.type, size: e.size, x: e.x, z: e.z })); 
-                    packet.score = sharedScore; packet.p2h = peerPlayer.health; 
-                }
-                conn.send(packet);
-                player.justFired = false;
+                let packet = { type: 'state', px: player.x, pz: player.z, pa: player.angle, prole: player.role, pct: player.chargeTimer, pdash: player.dashTimer > 0, phl: player.hyperLaserTimer > 0, fired: player.justFired };
+                if (isHost) { packet.enemies = enemies.map(e => ({ id: e.id, type: e.type, size: e.size, x: e.x, z: e.z })); packet.score = sharedScore; packet.p2h = peerPlayer.health; }
+                conn.send(packet); player.justFired = false;
             }
         }
 
-        function loop() { 
-            if (!gameRunning) return; 
-            update(); 
-            renderer.render(scene, camera);
-            requestAnimationFrame(loop); 
-        }
-        
+        let tick = 0;
+        function loop() { if (!gameRunning) return; tick++; update(); renderer.render(scene, camera); requestAnimationFrame(loop); }
         function startGame() { 
-            gameRunning = true; 
-            player.x = isHost ? -100 : 100; 
-            if (isHost) {
-                player.role = Math.random() > 0.5 ? 'viltrumite' : 'laser';
-                initPlayerMeshes();
-            }
+            gameRunning = true; player.x = isHost ? -100 : 100;
+            if (isHost) { player.role = Math.random() > 0.5 ? 'viltrumite' : 'laser'; initPlayerMeshes(); }
             requestAnimationFrame(loop); 
         }
     </script>
