@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Vanguard: The Invincible Update</title>
+    <title>Neon Vanguard: Blood & Guts</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body, html {
@@ -61,6 +61,8 @@
         .btn-super { border-color: #ffaa00; color: #ffaa00; box-shadow: 0 0 15px currentColor; display: none; }
         .btn-super:active { background: rgba(255, 170, 0, 0.5); }
         .btn-brake { border-color: #ff3333; color: #ff3333; }
+        .btn-dash { border-color: #ffaa00; color: #ffaa00; background: rgba(255, 170, 0, 0.1); }
+        .btn-dash:active { background: rgba(255, 170, 0, 0.5); }
     </style>
 </head>
 <body>
@@ -98,10 +100,6 @@
     <canvas id="gameCanvas"></canvas>
 
     <script>
-        // --- ASSET LOADING ---
-        const viltrumiteImg = new Image();
-        viltrumiteImg.src = 'viltrumite.png'; // Will use your custom photo if available
-
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         let width = canvas.width = window.innerWidth;
@@ -140,6 +138,7 @@
                     peerPlayer.isThrusting = data.pt; 
                     peerPlayer.chargeTimer = data.pct; 
                     peerPlayer.isHyperLaser = data.phl;
+                    peerPlayer.isDashing = data.pdash;
                     peerPlayer.role = data.prole;
 
                     if (!isHost && player.role === 'none') {
@@ -153,6 +152,11 @@
                         enemies = data.enemies || [];
                         sharedScore = data.score !== undefined ? data.score : sharedScore;
                         player.health = data.p2h;
+                        
+                        // Sync splatters created by host
+                        if (data.newSplatters) {
+                            data.newSplatters.forEach(s => splatters.push(s));
+                        }
                     }
                 } else if (data.type === 'super_trigger') {
                     triggerSuperAnimation(data.x, data.y);
@@ -196,22 +200,30 @@
         const player = { 
             x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, color: '#0ff', 
             isThrusting: false, justFired: false, cooldown: 0,
-            health: 100, maxHealth: 100, role: 'none', superCooldown: 0, chargeTimer: 0, hyperLaserTimer: 0
+            health: 100, maxHealth: 100, role: 'none', superCooldown: 0, chargeTimer: 0, hyperLaserTimer: 0,
+            dashTimer: 0, dashCooldown: 0
         };
-        const peerPlayer = { x: -9999, y: -9999, angle: 0, color: '#f0f', health: 100, role: 'none', chargeTimer: 0, isHyperLaser: false };
+        const peerPlayer = { x: -9999, y: -9999, angle: 0, color: '#f0f', health: 100, role: 'none', chargeTimer: 0, isHyperLaser: false, isDashing: false };
         
-        let lasers = []; let enemies = []; let particles = []; let superBlasts = [];
+        let lasers = []; let enemies = []; let particles = []; let superBlasts = []; let splatters = [];
+        let newSplattersToSync = []; // Host uses this to send new splatters to client
         
         function applyRoleStats(p) {
             if (p.role === 'viltrumite') {
-                p.maxHealth = 800; p.health = 800; // Massive health pool
+                p.maxHealth = 800; p.health = 800;
             } else if (p.role === 'laser') {
                 p.maxHealth = 200; p.health = 200; 
             }
             if (p === player) {
                 document.getElementById('btn-super').style.display = 'flex';
                 document.getElementById('super-text').style.display = 'block';
-                if(p.role === 'viltrumite') document.getElementById('btn-fire').innerText = "CLAP"; // Changed button text
+                
+                if(p.role === 'viltrumite') {
+                    document.getElementById('btn-fire').innerText = "CLAP";
+                    let brakeBtn = document.getElementById('btn-brake');
+                    brakeBtn.innerText = "DASH";
+                    brakeBtn.className = "btn btn-dash"; 
+                }
             }
         }
 
@@ -239,7 +251,6 @@
 
         function spawnLaser(x, y, angle, color, isLocal, isHyper, isSonicClap) {
             if (isSonicClap) {
-                // Massive piercing wide crescent
                 lasers.push({ x: x + Math.cos(angle)*30, y: y + Math.sin(angle)*30, vx: Math.cos(angle)*25, vy: Math.sin(angle)*25, color: '#ffffff', age: 0, isHyper: false, isClap: true, size: 60, angle: angle });
             } else if (isHyper) {
                 lasers.push({ x: x + Math.cos(angle)*40, y: y + Math.sin(angle)*40, vx: Math.cos(angle)*30, vy: Math.sin(angle)*30, color: '#00ffff', age: 0, isHyper: true, isClap: false, size: 40 });
@@ -252,6 +263,22 @@
             for(let i=0; i<20; i++) {
                 particles.push({ x: x, y: y, vx: (Math.random()-0.5)*15, vy: (Math.random()-0.5)*15, life: 1.0, decay: 0.04, color: color });
             }
+        }
+
+        function spawnBloodSplatter(x, y) {
+            let count = Math.floor(Math.random() * 5) + 5;
+            for(let i=0; i<count; i++) {
+                let splatter = {
+                    x: x + (Math.random()-0.5)*60,
+                    y: y + (Math.random()-0.5)*60,
+                    size: Math.random() * 12 + 4,
+                    life: 1.0
+                };
+                splatters.push(splatter);
+                if (isHost) newSplattersToSync.push(splatter);
+            }
+            // Memory cleanup
+            if (splatters.length > 300) splatters.splice(0, splatters.length - 300);
         }
 
         function updateUI() {
@@ -277,14 +304,34 @@
                     superBtn.style.borderColor = readyColor; superBtn.style.color = readyColor;
                     superBtn.style.boxShadow = `0 0 15px ${readyColor}`;
                 }
+
+                if (player.role === 'viltrumite') {
+                    let dashBtn = document.getElementById('btn-brake');
+                    if (player.dashCooldown > 0) {
+                        dashBtn.style.opacity = "0.3";
+                    } else {
+                        dashBtn.style.opacity = "1";
+                    }
+                }
             }
         }
 
         function update() {
             tick++;
-            // Passive Regeneration for Viltrumite
+            
+            // Update Splatters (fade over time)
+            for (let i = splatters.length - 1; i >= 0; i--) {
+                splatters[i].life -= 0.001;
+                if (splatters[i].life <= 0) splatters.splice(i, 1);
+            }
+
             if (player.role === 'viltrumite' && player.health < player.maxHealth && tick % 15 === 0) {
                 player.health += 2; 
+            }
+
+            if (player.role === 'viltrumite' && keys.brake && player.dashCooldown <= 0) {
+                player.dashTimer = 15; 
+                player.dashCooldown = 120; 
             }
 
             if (player.chargeTimer > 0) {
@@ -294,24 +341,35 @@
                     triggerSuperAnimation(player.x, player.y);
                     if (conn && conn.open) conn.send({ type: 'super_trigger', x: player.x, y: player.y });
                 }
+            } else if (player.dashTimer > 0) {
+                player.dashTimer--;
+                player.vx = Math.cos(player.angle) * 35; 
+                player.vy = Math.sin(player.angle) * 35;
+                if (player.dashTimer % 3 === 0) spawnExplosion(player.x, player.y, '#ffaa00');
             } else {
-                let turnSpeed = player.role === 'viltrumite' ? 0.14 : 0.08; // Viltrumite turns faster
-                let accel = player.role === 'viltrumite' ? 0.9 : 0.4; // Viltrumite accelerates massively
+                let turnSpeed = player.role === 'viltrumite' ? 0.14 : 0.08; 
+                let accel = player.role === 'viltrumite' ? 0.9 : 0.4; 
 
                 if (keys.left) player.angle -= turnSpeed;
                 if (keys.right) player.angle += turnSpeed;
 
                 player.isThrusting = keys.gas;
                 if (keys.gas) { player.vx += Math.cos(player.angle) * accel; player.vy += Math.sin(player.angle) * accel; }
-                if (keys.brake) { player.vx *= 0.80; player.vy *= 0.80; } else { player.vx *= 0.96; player.vy *= 0.96; }
+                
+                if (player.role === 'laser' && keys.brake) { 
+                    player.vx *= 0.80; player.vy *= 0.80; 
+                } else { 
+                    player.vx *= 0.96; player.vy *= 0.96; 
+                }
             }
 
             player.x += player.vx; player.y += player.vy;
             if(player.cooldown > 0) player.cooldown--;
             if(player.superCooldown > 0) player.superCooldown--;
             if(player.hyperLaserTimer > 0) player.hyperLaserTimer--;
+            if(player.dashCooldown > 0) player.dashCooldown--;
 
-            if (player.isThrusting && Math.random() > 0.2) {
+            if ((player.isThrusting || player.dashTimer > 0) && Math.random() > 0.2) {
                 let exhaustColor = player.role === 'viltrumite' ? '#ffaa00' : player.color;
                 particles.push({ x: player.x - Math.cos(player.angle)*20, y: player.y - Math.sin(player.angle)*20, vx: -player.vx*0.2, vy: -player.vy*0.2, life: 1.0, decay: 0.1, color: exhaustColor });
             }
@@ -322,6 +380,7 @@
                     for (let j = enemies.length - 1; j >= 0; j--) {
                         if (Math.hypot(b.x - enemies[j].x, b.y - enemies[j].y) < b.radius) {
                             spawnExplosion(enemies[j].x, enemies[j].y, enemies[j].type === 'brute' ? '#a020f0' : '#f00'); 
+                            spawnBloodSplatter(enemies[j].x, enemies[j].y);
                             enemies.splice(j, 1); sharedScore += 50;
                         }
                     }
@@ -337,20 +396,20 @@
                     for (let j = enemies.length - 1; j >= 0; j--) {
                         let hitDist = (l.isHyper || l.isClap) ? l.size + 15 : enemies[j].size;
                         if (Math.hypot(l.x - enemies[j].x, l.y - enemies[j].y) < hitDist) {
-                            
-                            // Laser Damage Logic
                             enemies[j].hp -= (l.isHyper ? 5 : (l.isClap ? 3 : 1));
                             
                             if (enemies[j].hp <= 0) {
                                 spawnExplosion(enemies[j].x, enemies[j].y, enemies[j].type === 'brute' ? '#a020f0' : '#f00');
+                                spawnBloodSplatter(enemies[j].x, enemies[j].y);
                                 sharedScore += (enemies[j].type === 'brute' ? 150 : 50);
                                 enemies.splice(j, 1); 
                             } else {
-                                // Hit feedback
                                 spawnExplosion(l.x, l.y, '#fff');
+                                // Small blood splatter on hit
+                                spawnBloodSplatter(enemies[j].x + (Math.random()-0.5)*20, enemies[j].y + (Math.random()-0.5)*20);
                             }
 
-                            if (!l.isHyper && !l.isClap) { lasers.splice(i, 1); break; } // Claps and Hyper pierce!
+                            if (!l.isHyper && !l.isClap) { lasers.splice(i, 1); break; } 
                         }
                     }
                 }
@@ -364,14 +423,13 @@
             let isFearFreeze = player.chargeTimer > 0 || peerPlayer.chargeTimer > 0;
 
             if (isHost) {
-                // Enhanced Enemy Spawning
                 if (Math.random() < 0.05 && enemies.length < 60 && !isFearFreeze) {
                     let t = Math.random() > 0.5 ? player : peerPlayer;
                     let rand = Math.random();
                     let eType = 'drone'; let eSize = 20; let eHp = 1; let eSpeed = 4.5;
                     
-                    if (rand > 0.85) { eType = 'brute'; eSize = 45; eHp = 5; eSpeed = 1.5; } // Big tanks
-                    else if (rand > 0.70) { eType = 'seeker'; eSize = 15; eHp = 1; eSpeed = 6.5; } // Fast swarms
+                    if (rand > 0.85) { eType = 'brute'; eSize = 45; eHp = 5; eSpeed = 1.5; } 
+                    else if (rand > 0.70) { eType = 'seeker'; eSize = 15; eHp = 1; eSpeed = 6.5; } 
 
                     enemies.push({ x: t.x + Math.cos(Math.random()*Math.PI*2)*1200, y: t.y + Math.sin(Math.random()*Math.PI*2)*1200, size: eSize, hp: eHp, speed: eSpeed, type: eType, targetId: t === player ? 'host' : 'client' });
                 }
@@ -386,13 +444,12 @@
                         let dHost = Math.hypot(player.x - e.x, player.y - e.y);
                         let dClient = Math.hypot(peerPlayer.x - e.x, peerPlayer.y - e.y);
                         
-                        // Collision Logic for Host
+                        // Collision Logic
                         if (dHost < e.size + 15) {
                             if (player.role === 'viltrumite') {
-                                // RAMMING LOGIC
-                                if (e.type === 'brute') player.health -= 15; // Takes a little damage from big guys
-                                // Insta-kill enemy
+                                if (e.type === 'brute' && player.dashTimer <= 0) player.health -= 15; 
                                 spawnExplosion(e.x, e.y, e.type === 'brute' ? '#a020f0' : '#f00');
+                                spawnBloodSplatter(e.x, e.y);
                                 sharedScore += (e.type === 'brute' ? 150 : 50);
                                 enemies.splice(i, 1);
                             } else {
@@ -402,8 +459,9 @@
                             }
                         } else if (dClient < e.size + 15) {
                             if (peerPlayer.role === 'viltrumite') {
-                                if (e.type === 'brute') peerPlayer.health -= 15; 
+                                if (e.type === 'brute' && !peerPlayer.isDashing) peerPlayer.health -= 15; 
                                 spawnExplosion(e.x, e.y, e.type === 'brute' ? '#a020f0' : '#f00');
+                                spawnBloodSplatter(e.x, e.y);
                                 sharedScore += (e.type === 'brute' ? 150 : 50);
                                 enemies.splice(i, 1);
                             } else {
@@ -427,9 +485,17 @@
                 let packet = {
                     type: 'state', px: player.x, py: player.y, pa: player.angle, pc: player.color,
                     pt: player.isThrusting, pct: player.chargeTimer, prole: player.role,
-                    phl: player.hyperLaserTimer > 0, fired: player.justFired
+                    phl: player.hyperLaserTimer > 0, pdash: player.dashTimer > 0, fired: player.justFired
                 };
-                if (isHost) { packet.enemies = enemies; packet.score = sharedScore; packet.p2h = peerPlayer.health; }
+                if (isHost) { 
+                    packet.enemies = enemies; 
+                    packet.score = sharedScore; 
+                    packet.p2h = peerPlayer.health; 
+                    if (newSplattersToSync.length > 0) {
+                        packet.newSplatters = newSplattersToSync;
+                        newSplattersToSync = []; // Clear after sending
+                    }
+                }
                 conn.send(packet);
                 player.justFired = false;
             }
@@ -448,15 +514,24 @@
 
             ctx.save();
             let camX = width / 2 - player.x; let camY = height / 2 - player.y;
-            if (isImpact || player.chargeTimer > 0) { camX += (Math.random()-0.5)*15; camY += (Math.random()-0.5)*15; }
+            if (isImpact || player.chargeTimer > 0 || player.dashTimer > 0) { camX += (Math.random()-0.5)*15; camY += (Math.random()-0.5)*15; }
             ctx.translate(camX, camY);
 
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.1)'; ctx.lineWidth = 2;
+            // Draw Background Grid
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.05)'; ctx.lineWidth = 2;
             const grid = 150; const sX = Math.floor((player.x - width/2)/grid)*grid; const sY = Math.floor((player.y - height/2)/grid)*grid;
             ctx.beginPath();
             for (let x=sX; x<sX+width+grid; x+=grid) { ctx.moveTo(x, player.y-height); ctx.lineTo(x, player.y+height); }
             for (let y=sY; y<sY+height+grid; y+=grid) { ctx.moveTo(player.x-width, y); ctx.lineTo(player.x+width, y); }
             ctx.stroke();
+
+            // Draw Blood Splatters (Floor decals)
+            splatters.forEach(s => {
+                ctx.fillStyle = `rgba(139, 0, 0, ${s.life})`; // Dark crimson color
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
 
             particles.forEach(p => { ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life); ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); });
             ctx.globalAlpha = 1.0;
@@ -468,7 +543,6 @@
                     ctx.fillRect(-l.size, -l.size/2, l.size*3, l.size);
                     ctx.restore();
                 } else if (l.isClap) {
-                    // Draw crescent sonic wave
                     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.angle);
                     ctx.beginPath(); ctx.arc(0, 0, l.size, -Math.PI/2, Math.PI/2); ctx.lineWidth = 10; ctx.strokeStyle = '#fff'; ctx.stroke();
                     ctx.restore();
@@ -485,7 +559,7 @@
                 
                 if (e.type === 'brute') {
                     ctx.beginPath(); ctx.rect(-20, -20, 40, 40); ctx.stroke();
-                    ctx.beginPath(); ctx.moveTo(-20,-20); ctx.lineTo(20,20); ctx.moveTo(20,-20); ctx.lineTo(-20,20); ctx.stroke(); // inner X
+                    ctx.beginPath(); ctx.moveTo(-20,-20); ctx.lineTo(20,20); ctx.moveTo(20,-20); ctx.lineTo(-20,20); ctx.stroke(); 
                 } else if (e.type === 'seeker') {
                     ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-8, 8); ctx.lineTo(-8, -8); ctx.closePath(); ctx.stroke(); 
                 } else {
@@ -502,24 +576,39 @@
                 ctx.lineWidth = 15 * (b.frame/60); ctx.strokeStyle = '#ffaa00'; ctx.stroke();
             });
 
-            if (peerPlayer.x !== -9999 && peerPlayer.role !== 'none') drawEntity(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, peerPlayer.isThrusting, peerPlayer.role, peerPlayer.chargeTimer);
-            if (player.role !== 'none') drawEntity(player.x, player.y, player.angle, player.color, player.isThrusting, player.role, player.chargeTimer);
+            if (peerPlayer.x !== -9999 && peerPlayer.role !== 'none') drawEntity(peerPlayer.x, peerPlayer.y, peerPlayer.angle, peerPlayer.color, peerPlayer.isThrusting, peerPlayer.role, peerPlayer.chargeTimer, peerPlayer.isDashing);
+            if (player.role !== 'none') drawEntity(player.x, player.y, player.angle, player.color, player.isThrusting, player.role, player.chargeTimer, player.dashTimer > 0);
 
             ctx.restore();
         }
 
-        function drawEntity(x, y, angle, color, isThrusting, role, chargeTimer) {
+        function drawEntity(x, y, angle, color, isThrusting, role, chargeTimer, isDashing) {
             ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
             
             if (role === 'viltrumite') {
                 const colors = ['#f00', '#0f0', '#00f', '#ff0', '#f0f', '#0ff', '#fff'];
-                let glow = (chargeTimer > 0) ? colors[Math.floor(Date.now() / 50) % colors.length] : '#ffaa00';
-                ctx.shadowBlur = chargeTimer > 0 ? 40 : 25; ctx.shadowColor = glow;
+                let glow = (chargeTimer > 0 || isDashing) ? colors[Math.floor(Date.now() / 50) % colors.length] : '#ffaa00';
+                ctx.shadowBlur = (chargeTimer > 0 || isDashing) ? 40 : 25; ctx.shadowColor = glow;
                 
-                if (viltrumiteImg.complete && viltrumiteImg.naturalHeight !== 0) {
-                    ctx.drawImage(viltrumiteImg, -30, -30, 60, 60);
-                } else {
-                    ctx.fillStyle = '#ffaa00'; ctx.fillRect(-20, -20, 40, 40);
+                // 1. Torso
+                ctx.fillStyle = '#ffcc00'; ctx.fillRect(-15, -8, 20, 16); 
+                // 2. Boots and Legs
+                ctx.fillStyle = '#111'; ctx.fillRect(-15, -8, 5, 16); 
+                ctx.fillStyle = '#0044ff'; ctx.fillRect(-10, -8, 10, 16); 
+                // 3. Fists
+                ctx.fillStyle = '#ffcc00';
+                ctx.beginPath(); ctx.arc(22, -10, 5, 0, Math.PI*2); ctx.fill(); 
+                ctx.beginPath(); ctx.arc(22, 10, 5, 0, Math.PI*2); ctx.fill(); 
+                // 4. Head
+                ctx.fillStyle = '#ffcc99'; 
+                ctx.beginPath(); ctx.arc(12, 0, 7, 0, Math.PI*2); ctx.fill();
+                // 5. Goggles
+                ctx.fillStyle = '#ffcc00'; ctx.fillRect(10, -6, 6, 12);
+                ctx.fillStyle = '#111'; ctx.fillRect(12, -5, 4, 4); ctx.fillRect(12, 1, 4, 4);
+
+                if (isDashing) {
+                    ctx.fillStyle = 'rgba(255, 204, 0, 0.3)';
+                    ctx.fillRect(-60, -10, 40, 20);
                 }
 
                 ctx.strokeStyle = glow; ctx.lineWidth = 2;
